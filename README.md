@@ -20,6 +20,8 @@ Xyzzy is written in the [Arturo](https://arturo-lang.io/) language.
 - [ ] Combat system
 - [ ] Conversation system
     - [ ] Dialog prompts
+- [ ] Music system?
+    - [ ] Maybe using ffmpeg
 - [ ] Movement
     - [ ] Events for entering zones
     - [ ] Events for first-time entering zones

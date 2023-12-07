@@ -202,8 +202,8 @@ triggerEvent #[
     text: "You disembark from the police boat on to the Liberty Island Docks, ready for your first official mission."
     messages: [
         "Alex Jacobson: Yo."
-        "Alex Jacobson: Go `talk` to your brother, you dig?"
-        "<Inner Voice>: Why does he talk like that?"
+        "Alex Jacobson: Go `talk` to your brother."
+        "<Inner Voice>: Talk is an action I can do, right? I should type `talk` followed by my brother's name."
     ]
 ]
 

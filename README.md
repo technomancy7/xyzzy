@@ -36,3 +36,9 @@ Xyzzy is written in the [Arturo](https://arturo-lang.io/) language.
     - [ ] Move an entity (including give/take items from inventories)
     - [ ] Set companion state (make entity follow player)
 - [ ] Input redirect (to allow prompts to temporarily take user input instead of passing it to the command parser)
+- [ ] Personal configs, to allow the user to define settings across any story
+    - [ ] aliases to shorten any other command string
+- [ ] Save system
+    - [ ] save/load.local <name> - to store the save data within the story file
+    - [ ] save/load.file <name> - to store the save as a separate file
+    - [ ] using without a name quicksave files under a `quicksave` name

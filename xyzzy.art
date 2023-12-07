@@ -1,0 +1,227 @@
+#!/usr/bin/env arturo
+
+engineVersion: 0.0.5
+storyName: args\values\0 ;"deusex"
+state: read.json ~"|storyName|.json"
+
+print ["= Launching xyzzy engine" engineVersion "="]
+print ["Loaded story" storyName " // Story Version:" state\version " // Target Engine Version: " state\engine]
+
+settings: #[
+    alive: true
+    focus: "player"
+]
+
+prompt: "(> "
+ac: ["north", "east", "south", "west", "down", "up", "in", "out", "help", "look", "move", "hello world"] 
+
+writeln: $[source text][
+    print ~"[ |color #green source| ] |text|"
+]
+
+updateEntityAutocomplete: $[loc][
+    ; delete any entity names already in there
+    loop state\entities [id ent] [ 
+        if? contains? ac ent\name [
+            ac: ac -- ent\name
+        ] 
+    ]
+    
+    ; add entities from the specified zone
+    loop state\entities [id ent] [ 
+        unless? contains? ent\tags "zone"  [
+            if? ent\location = loc [
+                ac: ac ++ ent\name
+            ]
+        ]
+    ]
+    
+    ; Quickly reboot the main loop to let the repl function load the updated list
+    set settings 'alive false
+    mainLoop
+]
+
+hints: #[
+    help: "perhaps you want to say hello?"
+    look: "use your eyes and observe your surroundings."
+    move: "use your feet and traverse the world."
+    quit: "return to the real world."
+    n: "north?"
+    e: "east?"
+    w: "west?"
+    s: "south?"
+] 
+
+; utilities
+
+player: $[][
+    return getEntity settings\focus
+]
+
+here: $[][
+    p: player
+    return getEntity p\location
+]
+
+hereid: $[][
+    p: player
+    return p\location
+]
+
+triggerEvent: $[evt][
+    if? contains? keys evt "startText" [
+        writeln "Event" evt\startText
+    ]
+    
+    if? contains? keys evt "text" [
+        writeln "Event" evt\text
+    ]
+    
+    if? contains? keys evt "messages" [
+        loop evt\messages [text] [
+            parts: split.by: ":" text
+            writeln parts\0 strip parts\1
+        ]
+    ]
+    
+    if? contains? keys evt "endText" [
+        writeln "Event" evt\endText
+    ]
+]
+
+triggerEventBlock: $[bl][
+    loop bl [ent] -> triggerEvent ent
+]
+
+
+getEntityByName: $[name location][
+    loop state\entities [key val] [
+        if? and? [name = val\name][location = val\location] [ return val ]
+    ]
+]
+
+getEntity: $[id][
+    loop state\entities [key val] ->
+        if? key = id [ return val ]
+]
+
+; commands
+quit: $[msg][
+    writeln "World" "Goodbye. TODO this will save state at some point"
+    set settings 'alive false
+]
+
+move: $[msg][
+    p: player
+    z: here
+    if? in? msg keys z\exits [
+        nextZoneId: get z\exits msg
+        nextZone: getEntity nextZoneId
+        set p 'location nextZoneId
+        set z 'contains remove z\contains settings\focus
+        set nextZone 'contains append nextZone\contains settings\focus
+        writeln "World" ~"You moved to |nextZone\name|."
+
+        unless? in? "visited" nextZone\tags[
+            unless? in? "start" nextZone\tags [ writeln "World" ~"You discovered a new area." ]
+            
+            set nextZone 'tags append nextZone\tags "visited"
+        ]
+    ] else [
+        writeln "World" ~"Sadly, you can't move |msg|."
+    ]
+    
+]
+
+help: $[msg][
+    writeln "World" "Nobody can help you here."
+]
+
+look: $[msg][
+    if? msg = "" [
+        z: here
+
+        if? in? "description" keys z [
+            writeln z\name z\description
+        ] else [
+            writeln z\name "It's a zone alright."
+        ]
+        loop z\contains [ent] [
+            print ent
+        ]
+    ]
+    else [
+        if? or? [msg = "me"][msg = "self"] [
+            p: player
+            writeln p\name "You are I."
+            writeln p\name ~"I am in |p\location|."
+            if? in? "description" keys p [
+                writeln p\name p\description
+            ]
+        ] else [
+            ;print "getting looker"
+            looker: getEntityByName msg hereid
+            ;print looker
+            if? looker [
+                if? in? "description" keys looker [
+                    writeln looker\name looker\description
+                ] else [
+                    writeln looker\name "?"
+                ]
+            ] else [
+                writeln "World" "You can't see that."
+            ]
+        ]
+    ]
+]
+
+processInput: $[line args][
+    case [line]
+        when? [="help"] -> help args
+        when? [="look"] -> look args
+        when? [="quit"] -> quit args
+        when? [="move"] -> move args
+        when? [="north"] -> move "north"
+        when? [="n"] -> move "north"
+        when? [="east"] -> move "east"
+        when? [="e"] -> move "east"
+        when? [="south"] -> move "south"
+        when? [="s"] -> move "south"
+        when? [="west"] -> move "west"
+        when? [="w"] -> move "west"
+        when? [="up"] -> move "up"
+        when? [="down"] -> move "down"
+        when? [="in"] -> move "in"
+        when? [="out"] -> move "out"
+        when? [=".ac"] -> updateEntityAutocomplete player\location
+        when? [=".t"] -> set settings 'focus "terrorist1"
+        else -> print "What?"    
+]
+
+triggerEvent #[
+    text: "You disembark from the police boat on to the Liberty Island Docks, ready for your first official mission."
+    messages: [
+        "Alex Jacobson: Yo."
+        "Alex Jacobson: Go `talk` to your brother, you dig?"
+        "<Inner Voice>: Why does he talk like that?"
+    ]
+]
+
+mainLoop: $[][    
+    set settings 'alive true
+    while [settings\alive][ 
+        inp: input.repl 
+                .complete: ac
+                .hint: hints
+                prompt
+        
+        if? inp <> "" [
+            arr: split.words inp
+            cmd: arr\0
+            arr: join.with:" " remove.once arr cmd
+            processInput cmd arr
+        ]
+    ]
+]
+
+mainLoop

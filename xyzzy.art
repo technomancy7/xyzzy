@@ -1,7 +1,7 @@
 #!/usr/bin/env arturo
 
 engineVersion: 0.0.5
-storyName: args\values\0 ;"deusex"
+storyName: args\values\0
 state: read.json ~"|storyName|.json"
 
 print ["= Launching xyzzy engine" engineVersion "="]
@@ -9,17 +9,46 @@ print ["Loaded story" storyName " // Story Version:" state\version " // Target E
 
 settings: #[
     alive: true
-    focus: "player"
+    focus: "jcd"
 ]
 
+userVars: #[
+    music: false
+    gui: false
+]
+storyVars: #[
+    goals: #[]
+    notes: []
+]
+
+
 prompt: "(> "
-ac: ["north", "east", "south", "west", "down", "up", "in", "out", "help", "look", "move", "hello world"] 
+ac: ["north", "east", "south", "west", "down", "up", "in", "out", "help", "look", "move", "notes", "unnote", "note"] 
+
+getEntityKeyTagged: $[tag][
+    loop state\entities [key val] [
+        if? in? tag val\tags [ return key ]
+    ]
+]
+
+startingZone: getEntityKeyTagged "start"
+
+loop state\entities [id ent] [ 
+    unless? contains? ent\tags "zone"  [
+        if? ent\location = startingZone [
+            ac: ac ++ ent\name
+        ]
+    ]
+]
 
 writeln: $[source text][
     print ~"[ |color #green source| ] |text|"
 ]
 
-updateEntityAutocomplete: $[loc][
+updateEntityAutocomplete: $[reboot][
+    p: player
+    loc: p\location
+
     ; delete any entity names already in there
     loop state\entities [id ent] [ 
         if? contains? ac ent\name [
@@ -33,12 +62,19 @@ updateEntityAutocomplete: $[loc][
             if? ent\location = loc [
                 ac: ac ++ ent\name
             ]
+            
+            if? ent\location = settings\focus [
+                ac: ac ++ ent\name
+            ]
         ]
     ]
     
     ; Quickly reboot the main loop to let the repl function load the updated list
-    set settings 'alive false
-    mainLoop
+    if? reboot [
+        set settings 'alive false
+        mainLoop
+    ]
+
 ]
 
 hints: #[
@@ -93,10 +129,21 @@ triggerEventBlock: $[bl][
     loop bl [ent] -> triggerEvent ent
 ]
 
+getNameOf: $[entId][
+    loop state\entities [key val] [
+        if? key = entId [ return val\name ]
+    ]
+]
 
 getEntityByName: $[name location][
     loop state\entities [key val] [
         if? and? [name = val\name][location = val\location] [ return val ]
+    ]
+]
+
+getEntityTagByName: $[name location][
+    loop state\entities [key val] [
+        if? and? [name = val\name][location = val\location] [ return key ]
     ]
 ]
 
@@ -111,6 +158,16 @@ quit: $[msg][
     set settings 'alive false
 ]
 
+moveEntity: $[entId nextZoneId][
+    e: getEntity entId
+    nextZone: getEntity nextZoneId
+    curLoc: getEntity e\location
+    set e 'location nextZoneId
+    set curLoc 'contains remove curLoc\contains entId
+    set nextZone 'contains append nextZone\contains entId
+    updateEntityAutocomplete true
+]
+
 move: $[msg][
     p: player
     z: here
@@ -121,7 +178,9 @@ move: $[msg][
         set z 'contains remove z\contains settings\focus
         set nextZone 'contains append nextZone\contains settings\focus
         writeln "World" ~"You moved to |nextZone\name|."
-
+        updateEntityAutocomplete true
+        ;set settings 'alive false
+        ;mainLoop
         unless? in? "visited" nextZone\tags[
             unless? in? "start" nextZone\tags [ writeln "World" ~"You discovered a new area." ]
             
@@ -140,23 +199,29 @@ help: $[msg][
 look: $[msg][
     if? msg = "" [
         z: here
-
+        p: player
+        
         if? in? "description" keys z [
             writeln z\name z\description
         ] else [
             writeln z\name "It's a zone alright."
         ]
+        s: []
         loop z\contains [ent] [
-            print ent
+            n: getNameOf ent
+            s: s ++ n
         ]
+        alls: join.with:", " s
+        writeln z\name ~"You can see |alls|"
     ]
     else [
         if? or? [msg = "me"][msg = "self"] [
             p: player
             writeln p\name "You are I."
-            writeln p\name ~"I am in |p\location|."
-            if? in? "description" keys p [
-                writeln p\name p\description
+            writeln p\name ~"I am in |getNameOf p\location|."
+            if? in? "description" keys p -> writeln p\name p\description
+            loop p\contains [ent] [
+                writeln p\name ~"I am holding: |getNameOf ent|."
             ]
         ] else [
             ;print "getting looker"
@@ -175,12 +240,102 @@ look: $[msg][
     ]
 ]
 
+savestate: $[name][
+    unless? in? "saves" keys storyVars [
+        set storyVars 'saves 0
+    ]
+    
+    set storyVars 'saves add storyVars\saves 1
+    output: #[
+        entities: state\entities
+        focus: settings\focus
+        vars: storyVars
+    ]
+    
+    if? name = "" [ write.json "quicksave.json" output ] else [ write.json ~"|name|.json" output ]
+]
+
+loadstate: $[name][
+    if? name = "" [ 
+        d: read.json "quicksave.json" 
+    ] else [ 
+        d: read.json ~"|name|.json" 
+    ]
+    
+    set state 'entities d\entities
+    set settings 'focus d\focus
+    loop d\vars [k v] -> set storyVars k v
+]
+
+listnotes: $[s][
+    i: 0
+    loop storyVars\notes [k] [
+        writeln to :string i k
+        i: i + 1
+    ]
+]
+
+addnote: $[s][
+    storyVars\notes: append storyVars\notes s
+    writeln "<Inner Voice>" s
+]
+
+deletenote: $[s][
+    i: 0
+    t: to :integer s
+    loop storyVars\notes [k] [
+        if? i = t [
+            storyVars\notes: remove storyVars\notes k
+            writeln "<Inner Voice>" ~"Forgot about `|k|`"
+            return null
+        ]
+        i: i + 1
+    ]
+    writeln "<Inner Voice>" "I can't find that note."
+]
+
+use: $[args][]
+take: $[args][
+    p: player
+    item: getEntityByName args p\location
+    itemId: getEntityTagByName args p\location
+    if? item [
+        if? in? "inventory" item\tags [
+            writeln "Notice" ~"Taken |item\name|."
+            moveEntity itemId settings\focus
+        ]else[
+            writeln "<Inner Voice>" ~"I can't take |item\name|."
+        ]
+    ] else [
+        writeln "<Inner Voice>" ~"I can't see a |args|."
+    ]
+]
+
+drop: $[args][
+    p: player
+    item: getEntityByName args settings\focus
+    itemId: getEntityTagByName args settings\focus
+    if? item [
+        if? in? "inventory" item\tags [
+            writeln "Notice" ~"Dropped |item\name|."
+            moveEntity itemId p\location
+        ]else[
+            writeln "<Inner Voice>" ~"I can't take |item\name|."
+        ]
+    ] else [
+        writeln "<Inner Voice>" ~"I don't have a |args|."
+    ]
+]
+
 processInput: $[line args][
     case [line]
         when? [="help"] -> help args
         when? [="look"] -> look args
         when? [="quit"] -> quit args
         when? [="move"] -> move args
+        when? [="take"] -> take args
+        when? [="drop"] -> drop args
+        when? [="use"] -> use args
         when? [="north"] -> move "north"
         when? [="n"] -> move "north"
         when? [="east"] -> move "east"
@@ -193,8 +348,13 @@ processInput: $[line args][
         when? [="down"] -> move "down"
         when? [="in"] -> move "in"
         when? [="out"] -> move "out"
-        when? [=".ac"] -> updateEntityAutocomplete player\location
-        when? [=".t"] -> set settings 'focus "terrorist1"
+        when? [="save"] -> savestate args
+        when? [="load"] -> loadstate args
+        when? [="notes"] -> listnotes args
+        when? [="note"] -> addnote args
+        when? [="unnote"] -> deletenote args
+        when? [=".ac"] -> updateEntityAutocomplete true
+        when? [=".coin"] -> print storyVars
         else -> print "What?"    
 ]
 
@@ -202,13 +362,14 @@ triggerEvent #[
     text: "You disembark from the police boat on to the Liberty Island Docks, ready for your first official mission."
     messages: [
         "Alex Jacobson: Yo."
-        "Alex Jacobson: Go `talk` to your brother."
-        "<Inner Voice>: Talk is an action I can do, right? I should type `talk` followed by my brother's name."
+        "Alex Jacobson: Go `talk` to Paul."
+        "<Inner Voice>: Talk is an action I can do, right? I should type `talk` followed by the name of the person I want to talk to."
     ]
 ]
 
 mainLoop: $[][    
     set settings 'alive true
+
     while [settings\alive][ 
         inp: input.repl 
                 .complete: ac
@@ -224,4 +385,5 @@ mainLoop: $[][
     ]
 ]
 
+;updateEntityAutocomplete
 mainLoop

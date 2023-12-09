@@ -9,7 +9,7 @@ data\engine: "0.0.5"
 
 data\entities: #[]
 
-set data\entities 'player #[
+set data\entities 'jcd #[
     name: "jc denton"
     tags: [player human]
     contains: []
@@ -46,12 +46,18 @@ set data\entities 'jcsMedkit #[
     location: "libertyIslandDock"
 ]
 
+set data\entities 'libertyMedkit1 #[
+    name: "medkit"
+    tags: [inventory consumable]
+    location: "libertyIslandDock"
+]
+
 ; zones
 set data\entities 'libertyIslandDock #[
     name: "Liberty Island: Docks"
     description: "The docks."
     tags: [zone start]
-    contains: [player jcsPistol jcsMedkit jcsProd]
+    contains: [player jcsPistol jcsMedkit jcsProd libertyMedkit1]
     exits: #[
         north: "libertyIsland1"
     ]

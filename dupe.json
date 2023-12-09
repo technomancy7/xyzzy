@@ -1,0 +1,264 @@
+{
+    "name": "Deus Ex",
+    "author": "technomancer",
+    "entities": {
+        "player": {
+            "name": "jc denton",
+            "tags": [
+                "player",
+                "human"
+            ],
+            "contains": [],
+            "health": 100,
+            "energy": 100,
+            "location": "libertyIslandDock",
+            "description": "It's you, wild!"
+        },
+        "terrorist1": {
+            "name": "terrorist",
+            "tags": [
+                "enemy",
+                "human"
+            ],
+            "contains": [],
+            "health": 100,
+            "location": "libertyIsland1"
+        },
+        "jcsPistol": {
+            "name": "pistol",
+            "tags": [
+                "inventory",
+                "weapon",
+                "ranged"
+            ],
+            "location": "libertyIslandDock"
+        },
+        "jcsProd": {
+            "name": "prod",
+            "tags": [
+                "inventory",
+                "weapon",
+                "melee",
+                "silent"
+            ],
+            "location": "libertyIslandDock",
+            "description": "an electric prod"
+        },
+        "jcsMedkit": {
+            "name": "medkit",
+            "tags": [
+                "inventory",
+                "consumable"
+            ],
+            "location": "libertyIslandDock"
+        },
+        "libertyIslandDock": {
+            "name": "Liberty Island: Docks",
+            "description": "The docks.",
+            "tags": [
+                "zone",
+                "start"
+            ],
+            "contains": [
+                "player",
+                "jcsPistol",
+                "jcsMedkit",
+                "jcsProd"
+            ],
+            "exits": {
+                "north": "libertyIsland1"
+            }
+        },
+        "libertyIsland1": {
+            "name": "Liberty Island: Zone 1",
+            "description": "You can see the statue from here.",
+            "tags": [
+                "zone"
+            ],
+            "contains": [
+                "terrorist1"
+            ],
+            "exits": {
+                "south": "libertyIslandDock"
+            }
+        }
+    },
+    "version": "0.0.1",
+    "engine": "0.0.5",
+    "saves": {
+        "quicksave": {
+            "entities": {
+                "player": {
+                    "name": "jc denton",
+                    "tags": [
+                        "player",
+                        "human"
+                    ],
+                    "contains": [],
+                    "health": 100,
+                    "energy": 100,
+                    "location": "libertyIslandDock",
+                    "description": "It's you, wild!"
+                },
+                "terrorist1": {
+                    "name": "terrorist",
+                    "tags": [
+                        "enemy",
+                        "human"
+                    ],
+                    "contains": [],
+                    "health": 100,
+                    "location": "libertyIsland1"
+                },
+                "jcsPistol": {
+                    "name": "pistol",
+                    "tags": [
+                        "inventory",
+                        "weapon",
+                        "ranged"
+                    ],
+                    "location": "libertyIslandDock"
+                },
+                "jcsProd": {
+                    "name": "prod",
+                    "tags": [
+                        "inventory",
+                        "weapon",
+                        "melee",
+                        "silent"
+                    ],
+                    "location": "libertyIslandDock",
+                    "description": "an electric prod"
+                },
+                "jcsMedkit": {
+                    "name": "medkit",
+                    "tags": [
+                        "inventory",
+                        "consumable"
+                    ],
+                    "location": "libertyIslandDock"
+                },
+                "libertyIslandDock": {
+                    "name": "Liberty Island: Docks",
+                    "description": "The docks.",
+                    "tags": [
+                        "zone",
+                        "start"
+                    ],
+                    "contains": [
+                        "player",
+                        "jcsPistol",
+                        "jcsMedkit",
+                        "jcsProd"
+                    ],
+                    "exits": {
+                        "north": "libertyIsland1"
+                    }
+                },
+                "libertyIsland1": {
+                    "name": "Liberty Island: Zone 1",
+                    "description": "You can see the statue from here.",
+                    "tags": [
+                        "zone"
+                    ],
+                    "contains": [
+                        "terrorist1"
+                    ],
+                    "exits": {
+                        "south": "libertyIslandDock"
+                    }
+                }
+            },
+            "focus": "player",
+            "vars": {},
+            "notes": {}
+        },
+        "1": {
+            "entities": {
+                "player": {
+                    "name": "jc denton",
+                    "tags": [
+                        "player",
+                        "human"
+                    ],
+                    "contains": [],
+                    "health": 100,
+                    "energy": 100,
+                    "location": "libertyIslandDock",
+                    "description": "It's you, wild!"
+                },
+                "terrorist1": {
+                    "name": "terrorist",
+                    "tags": [
+                        "enemy",
+                        "human"
+                    ],
+                    "contains": [],
+                    "health": 100,
+                    "location": "libertyIsland1"
+                },
+                "jcsPistol": {
+                    "name": "pistol",
+                    "tags": [
+                        "inventory",
+                        "weapon",
+                        "ranged"
+                    ],
+                    "location": "libertyIslandDock"
+                },
+                "jcsProd": {
+                    "name": "prod",
+                    "tags": [
+                        "inventory",
+                        "weapon",
+                        "melee",
+                        "silent"
+                    ],
+                    "location": "libertyIslandDock",
+                    "description": "an electric prod"
+                },
+                "jcsMedkit": {
+                    "name": "medkit",
+                    "tags": [
+                        "inventory",
+                        "consumable"
+                    ],
+                    "location": "libertyIslandDock"
+                },
+                "libertyIslandDock": {
+                    "name": "Liberty Island: Docks",
+                    "description": "The docks.",
+                    "tags": [
+                        "zone",
+                        "start"
+                    ],
+                    "contains": [
+                        "player",
+                        "jcsPistol",
+                        "jcsMedkit",
+                        "jcsProd"
+                    ],
+                    "exits": {
+                        "north": "libertyIsland1"
+                    }
+                },
+                "libertyIsland1": {
+                    "name": "Liberty Island: Zone 1",
+                    "description": "You can see the statue from here.",
+                    "tags": [
+                        "zone"
+                    ],
+                    "contains": [
+                        "terrorist1"
+                    ],
+                    "exits": {
+                        "south": "libertyIslandDock"
+                    }
+                }
+            },
+            "focus": "player",
+            "vars": {},
+            "notes": {}
+        }
+    }
+}

@@ -1,8 +1,4 @@
 {
-    "name": "Deus Ex",
-    "author": "technomancer",
-    "version": "0.0.1",
-    "engine": "0.0.5",
     "entities": {
         "jcd": {
             "name": "jc denton",
@@ -10,7 +6,9 @@
                 "player",
                 "human"
             ],
-            "contains": [],
+            "contains": [
+                "jcsPistol"
+            ],
             "health": 100,
             "energy": 100,
             "location": "libertyIslandDock",
@@ -33,7 +31,7 @@
                 "weapon",
                 "ranged"
             ],
-            "location": "libertyIslandDock"
+            "location": "jcd"
         },
         "jcsProd": {
             "name": "prod",
@@ -54,14 +52,6 @@
             ],
             "location": "libertyIslandDock"
         },
-        "libertyMedkit1": {
-            "name": "medkit",
-            "tags": [
-                "inventory",
-                "consumable"
-            ],
-            "location": "libertyIslandDock"
-        },
         "libertyIslandDock": {
             "name": "Liberty Island: Docks",
             "description": "The docks.",
@@ -70,11 +60,9 @@
                 "start"
             ],
             "contains": [
-                "jcd",
-                "jcsPistol",
+                "player",
                 "jcsMedkit",
-                "jcsProd",
-                "libertyMedkit1"
+                "jcsProd"
             ],
             "exits": {
                 "north": "libertyIsland1"
@@ -93,5 +81,11 @@
                 "south": "libertyIslandDock"
             }
         }
+    },
+    "focus": "jcd",
+    "vars": {
+        "goals": {},
+        "notes": [],
+        "saves": 1
     }
 }

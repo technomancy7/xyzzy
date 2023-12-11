@@ -3,6 +3,47 @@
     "author": "technomancer",
     "version": "0.0.1",
     "engine": "0.0.5",
+    "conversations": {
+        "paulStart": {
+            "texts": [
+                "Paul Denton: Yo bro."
+            ],
+            "options": [
+                {
+                    "text": "sup",
+                    "trigger": {
+                        "say": "$player: sup",
+                        "speakTo": "paul1"
+                    }
+                },
+                {
+                    "text": "nvm im out",
+                    "alias": "end",
+                    "trigger": {
+                        "say": "$player: nvm im out",
+                        "speakTo": "end"
+                    }
+                },
+            ]
+        },
+        "paul1": {
+            "texts": [
+                "Paul Denton: Hey, quickly, say `gep`, `sniper`, or `crossbow`.",
+                "$player: oh fuck"
+            ],
+            "options": [
+                {
+                    "text": "GEP gun.",
+                    "alias": "gep",
+                    "trigger": {
+                        "say": "Paul Denton: Nature's lockpick!",
+                        "move_item": "paulsGepGun > libertyIslandDock",
+                        "speakTo": ""
+                    }
+                }
+            ]
+        }
+    },
     "entities": {
         "jcd": {
             "name": "jc denton",
@@ -15,6 +56,20 @@
             "energy": 100,
             "location": "libertyIslandDock",
             "description": "It's you, wild!"
+        },
+        "paul": {
+            "name": "paul denton",
+            "tags": [
+                "ally",
+                "human"
+            ],
+            "contains": [],
+            "health": 100,
+            "location": "libertyIslandDock",
+            "talk": {
+                "say": "$player: yo bro, i am initiating dialog with you",
+                "speakTo": "paulStart"
+            }
         },
         "terrorist1": {
             "name": "terrorist",
@@ -74,7 +129,8 @@
                 "jcsPistol",
                 "jcsMedkit",
                 "jcsProd",
-                "libertyMedkit1"
+                "libertyMedkit1",
+                "paul"
             ],
             "exits": {
                 "north": "libertyIsland1"

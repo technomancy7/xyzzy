@@ -1,0 +1,11 @@
+test: function[name][
+    inspect name
+    inspect attrs\watch
+    print attr "watch"
+    print attr "dead"
+]
+
+test
+    .watch: "me"
+    .dead
+    "you"

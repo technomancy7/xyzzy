@@ -2,45 +2,120 @@
 
 ; -> xyzzy text adventure engine
 engineVersion: 0.0.5
-storyName: args\values\0
-state: read.json ~"|storyName|.json"
-
-print ["= Launching xyzzy engine" engineVersion "="]
-print ["Loaded story" storyName " // Story Version:" state\version " // Target Engine Version: " state\engine]
 
 settings: #[
     alive: true
     focus: "jcd"
     terminal: true
+    devMode: false
 ]
 
 userVars: #[
     music: false
     gui: false
+    aliases: #[
+        n: "north"
+    ]
 ]
 
 storyVars: #[
-    goals: #[]
+    ;goals: #[] -> moved to story state
     notes: []
     conv: ""
     infoString: ""
+    battle: #[
+        members: []
+        turns: 0
+        active: true
+    ]
+    flags: #[] ;true/false values
+    intflags: #[] ;counters and numbers
 ]
 
+getFlag: $[name][
+    return storyVars\flags\[name]
+]
 
-prompt: "(> "
-ac: ["north", "east", "south", "west", "down", "up", "in", "out", "help", "look", "move", "notes", "unnote", "note", "talk"]
+setFlag: $[name v][
+    storyVars\flags\[name]: to :logical v
+]
+
+toggleFlag: $[name][
+    unless? key? storyVars\flags name -> return null
+
+    if? storyVars\flags\[name] = true [
+        storyVars\flags\[name]: false
+    ] else [
+        storyVars\flags\[name]: true
+    ]
+]
+print ["= Launching xyzzy engine" engineVersion "="]
+
+storyPath: args\values\0
+savePath: ~"|path\home|xyzzy/"
+userPath: ~"|savePath|user.json"
+memoryPath: ~"|savePath|saves/"
+
+unless? exists?.directory savePath [
+    print ~"Creating save directory |savePath|"
+    write.directory savePath ""
+]
+
+unless? exists?.directory memoryPath [
+    print ~"Creating memory directory |memoryPath|"
+    write.directory memoryPath ""
+]
+
+unless? exists? userPath [
+    print ~"Creating user settings |userPath|"
+    write.json userPath userVars
+] else [
+    print "Loading user settings..."
+    userVars: read.json userPath
+]
+
+print ["Loading" storyPath]
+if? exists? ~"|storyPath|.json" [
+    state: read.json ~"|storyPath|.json"
+] if? exists? ~"|savePath||storyPath|.json" [
+    state: read.json ~"|savePath||storyPath|.json"
+] else [
+    panic.code:1 "story file could not be found, quitting."
+]
+print ["Loaded story" state\name " // Story Version:" state\version " // Target Engine Version: " state\engine]
+
+terminal: #[
+    prompt: "(> "
+    ac: ["north", "east", "south", "west", "down", "up", "in", "out", "help", "look", "move", "notes", "unnote", "note", "talk"]
+    hints: #[
+        help: ":perhaps you want to say hello?"
+        look: ":use your eyes and observe your surroundings. (enter an entity name, tab to autocomplete)"
+        move: ":use your feet and traverse the world. (enter a direction)"
+        quit: ":return to the real world."
+        talk: ":initiate conversation with a (preferrably) living entity. (enter an entity name, tab to autocomplete)"
+        n: "north?"
+        e: "east?"
+        w: "west?"
+        s: "south?"
+    ]
+]
 
 setPrompt: $[l][
-    prompt: l
-    rebootInput
+    terminal\prompt: l
+]
+
+setInfoString: $[s][
+    storyVars\infoString: s
 ]
 
 rebootInput: $[][
+    print "WARNING: REBOOTING INPUT LOOP (Not recommended)"
     if? settings\terminal [
         set settings 'alive false
         mainLoop
     ]
 ]
+
 getEntityKeyTagged: $[tag][
     loop state\entities [key val] [
         if? in? tag val\tags [ return key ]
@@ -52,62 +127,48 @@ startingZone: getEntityKeyTagged "start"
 loop state\entities [id ent] [
     unless? contains? ent\tags "zone"  [
         if? ent\location = startingZone [
-            ac: ac ++ ent\name
+            terminal\ac: append terminal\ac ent\name
         ]
     ]
 ]
 
-writeln: $[source text][ print ~"[ |color #green source| ] |text|" ]
-writewarning: $[source text][ print ~"[ |color #red source| ] |text|" ]
-writeinfo: $[source text][ print ~"[ |color #blue source| ] |text|" ]
+resolveNameStuff: $[source][
+    if? source = "$player" -> return state\entities\[settings\focus]\name
+    if? source = "$playerId" -> return settings\focus
+    return source
+]
+
+writeln: $[source text][ print ~"[ |color #green resolveNameStuff source| ] |text|" ]
+writewarning: $[source text][ print ~"[ |color #red resolveNameStuff source| ] |text|" ]
+writeinfo: $[source text][ print ~"[ |color #blue resolveNameStuff source| ] |text|" ]
 
 say: $[text][
-    parts: split.by: ":" text
-    writeln parts\0 strip parts\1
+    if? contains? text ":"  [
+        parts: split.by: ":" text
+        writeln parts\0 strip parts\1
+    ] else [
+        writeln text
+    ]
+
 ]
-updateEntityAutocomplete: $[reboot][
+
+updateEntityAutocomplete: $[][
     p: player
     loc: p\location
 
     ; delete any entity names already in there
     loop state\entities [id ent] [
-        if? contains? ac ent\name [
-            ac: ac -- ent\name
-        ]
+        if? contains? terminal\ac ent\name -> terminal\ac: remove terminal\ac ent\name
     ]
 
     ; add entities from the specified zone
     loop state\entities [id ent] [
         unless? contains? ent\tags "zone"  [
-            if? ent\location = loc [
-                ac: ac ++ ent\name
-            ]
+            if? ent\location = loc -> terminal\ac: append terminal\ac ent\name
 
-            if? ent\location = settings\focus [
-                ac: ac ++ ent\name
-            ]
+            if? ent\location = settings\focus -> terminal\ac: append terminal\ac ent\name
         ]
     ]
-
-    ; Quickly reboot the main loop to let the repl function load the updated list
-    if? reboot [
-        if? settings\terminal [
-            set settings 'alive false
-            mainLoop
-        ]
-    ]
-]
-
-hints: #[
-    help: ":perhaps you want to say hello?"
-    look: ":use your eyes and observe your surroundings. (enter an entity name, tab to autocomplete)"
-    move: ":use your feet and traverse the world. (enter a direction)"
-    quit: ":return to the real world."
-    talk: ":initiate conversation with a (preferrably) living entity. (enter an entity name, tab to autocomplete)"
-    n: "north?"
-    e: "east?"
-    w: "west?"
-    s: "south?"
 ]
 
 ; utilities
@@ -124,56 +185,112 @@ hereid: $[][
     return p\location
 ]
 
+getGoalState: $[goal key][]
+completeGoal: $[goal][]
+decompleteGoal: $[goal][]
+activateGoal: $[goal][]
+deactivateGoal: $[goal][]
+showGoal: $[goal][]
+hideGoal: $[goal][]
+
+startCombat: $[][
+    storyVars\battle\turns: 0
+    storyVars\battle\members: []
+    storyVars\battle\active: true
+    ; todo replace autocomplete
+]
+
+incrementBattleTurn: $[][
+    storyVars\battle\turns: storyVars\battle\turns + 1
+]
+
+resumeCombat: $[][
+    storyVars\battle\active: true
+]
+pauseCombat: $[][
+    storyVars\battle\active: false
+]
+processCombatInput: $[][]
+setShop: $[target][]
+
+setConv: $[target][
+    if? or? [target = ""][target = "end"] [
+        storyVars\conv: "" ;storyVars\infoString: ""
+        setPrompt "(> "
+        return null
+    ] else [
+        evt: state\conversations\[target] ;storyVars\infoString: "You are in dialog with someone."
+        setPrompt "(In conversation) (> "
+        if? contains? keys evt "text" -> say evt\text
+        if? contains? keys evt "texts" -> loop evt\texts [text] -> say text
+
+        storyVars\conv: target
+    ]
+
+    showConvOptions
+]
+
 triggerEvent: $[evt][
-    if? contains? keys evt "startText" [ writeln "Event" evt\startText ]
-    if? contains? keys evt "text" [ writeln "Event" evt\text ]
-    if? contains? keys evt "say" [ say evt\say ]
-    if? contains? keys evt "speakTo" [
+    if? contains? keys evt "startText" -> writeln "Event" evt\startText
+    if? contains? keys evt "message" -> writeln "Event" evt\message
+    if? contains? keys evt "text" -> say evt\text
+    if? contains? keys evt "say" -> say evt\say
+    if? contains? keys evt "speakTo" -> setConv evt\speakTo
 
-        if? evt\speakTo = "" [
-            storyVars\conv: ""
-            storyVars\infoString: ""
-        ] else [
-            storyVars\infoString: "You are in dialog with someone."
-            ckey: evt\speakTo
-            loop state\conversations\[ckey]\texts [text] [
-                say text
+    if? contains? keys evt "moveEntity" [
+        parts: split.by: ">" evt\moveEntity
+        entId: strip parts\0
+        targetId: resolveNameStuff strip parts\1
+        moveEntity entId targetId
+    ]
+
+    if? contains? keys evt "messages" -> loop evt\messages [text] -> writeln "Event" text
+    if? contains? keys evt "texts" -> loop evt\texts [text] -> say text
+    if? contains? keys evt "endText" -> writeln "Event" evt\endText
+]
+
+showConvOptions: $[][
+    opts: state\conversations\[storyVars\conv]\options
+    i: 0
+    loop opts [opt] [
+        hint: ""
+        if? contains? keys opt "hint" -> hint: ~" (|opt\hint|)"
+
+        if? contains? keys opt "onlyIf" [
+            if? do opt\onlyIf [
+                writeinfo ~"# |to :string i|" ~"|opt\text||hint|"
+            ] else [
+                if? and? [contains? keys opt "hidden"][opt\hidden = true] [
+                    writeinfo ~"# |to :string i|" "<???>|hint|"
+                ] else [
+                    writeinfo ~"# |to :string i|" ~"|opt\text||hint|"
+                ]
             ]
-            storyVars\conv: evt\speakTo
+        ] else [
+            writeinfo ~"# |to :string i|" ~"|opt\text||hint|"
         ]
-
-        i: 0
-        loop state\conversations\[ckey]\options [opt] [
-            writeinfo ~"# |to :string i|" opt\text
-
-            i: i + 1
-        ]
+        i: i + 1
     ]
+]
 
-
-    if? contains? keys evt "messages" [
-        loop evt\messages [text] [
-            ;parts: split.by: ":" text
-            ;writeln parts\0 strip parts\1
-            say text
+runConvOpt: $[opt][
+    if? contains? keys opt "onlyIf" [
+        if? do opt\onlyIf [
+            triggerEvent opt\trigger
+        ] else [
+            writeln "Error" "Can't select this option."
         ]
+    ] else [
+        triggerEvent opt\trigger
     ]
-
-    if? contains? keys evt "endText" [ writeln "Event" evt\endText ]
 ]
 
 processConv: $[line][
-    if? line = "?"[
-        i: 0
-        loop state\conversations\[storyVars\conv]\options [opt] [
-            writeinfo ~"# |to :string i|" opt\text
-
-            i: i + 1
-        ]
+    if? line = "?" [
+        showConvOptions
         return null
     ]
     if? numeric? line [
-        print ["numeric" line]
         idx: to :integer line
         if? idx >= size state\conversations\[storyVars\conv]\options [
             writeln "Error" "Invalid selection."
@@ -183,19 +300,22 @@ processConv: $[line][
             writeln "Error" "Invalid selection."
             return null
         ]
-        print state\conversations\[storyVars\conv]\options\[idx]
+        runConvOpt state\conversations\[storyVars\conv]\options\[idx]
+
     ] else [
         loop state\conversations\[storyVars\conv]\options [opt] [
             if? line = opt\text [
-                print ["selected via text match" opt]
+                runConvOpt opt
                 return null
             ]
             if? and? [contains? keys opt "alias"][line = opt\alias] [
-                print ["selected via alias" opt]
+                runConvOpt opt
                 return null
             ]
-            if? in? line opt\text [
-                print ["selected via text match" opt]
+            matchMin: 0.7
+
+            if? matchMin < jaro line opt\text [
+                runConvOpt opt
                 return null
             ]
         ]
@@ -242,7 +362,7 @@ moveEntity: $[entId nextZoneId][
     set e 'location nextZoneId
     set curLoc 'contains remove curLoc\contains entId
     set nextZone 'contains append nextZone\contains entId
-    updateEntityAutocomplete true
+    updateEntityAutocomplete
 ]
 
 move: $[msg][
@@ -262,15 +382,13 @@ move: $[msg][
 
             set nextZone 'tags append nextZone\tags "visited"
         ]
-        updateEntityAutocomplete true
+        print "Updating ac"
+        updateEntityAutocomplete
+        print ["post" terminal\ac]
     ] else [
         writeln "World" ~"Sadly, you can't move |msg|."
     ]
 
-]
-
-help: function[msg][
-    writeln "World" "Nobody can help you here."
 ]
 
 look: $[msg][
@@ -318,25 +436,23 @@ look: $[msg][
 ]
 
 savestate: $[name][
-    unless? in? "saves" keys storyVars [
-        set storyVars 'saves 0
-    ]
-
+    unless? in? "saves" keys storyVars -> set storyVars 'saves 0
     set storyVars 'saves add storyVars\saves 1
+
     output: #[
         entities: state\entities
         focus: settings\focus
         vars: storyVars
     ]
 
-    if? name = "" [ write.json "quicksave.json" output ] else [ write.json ~"|name|.json" output ]
+    if? name = "" [ write.json ~"|memoryPath|quicksave.json" output ] else [ write.json ~"|memoryPath||name|.json" output ]
 ]
 
 loadstate: $[name][
     if? name = "" [
-        d: read.json "quicksave.json"
+        d: read.json ~"|memoryPath|quicksave.json"
     ] else [
-        d: read.json ~"|name|.json"
+        d: read.json ~"|memoryPath||name|.json"
     ]
 
     set state 'entities d\entities
@@ -435,6 +551,46 @@ cmdGetUserVar: $[args][
         writeln "Xyzzy" ~"|color #red args| = |color #red to :string getUserVar args|"
     ]
 ]
+
+help: function[msg][
+    if? msg = "" [
+        writeinfo "Help" "Add a subject to the help command to get more information."
+        writeinfo "Help" "[input] [conversations]"
+        writeinfo "Help" "Commands: [look] [move] [take] [drop] [use] [talk] [north] [east] [south] [west] [in] [out] [up] [down]"
+        writeinfo "Help" "As you type a command, a hint may pop up showing what it does and what you should give to it."
+    ] else [
+        if? msg = "input" [
+            writeinfo "Help" "Type commands to make things happen. Most commands take a parameter, for example, talk needs you to tell it who you're talking to."
+            writeinfo "Help" "Most commands, and entities in the world, can be auto-completed by pressing tab, so you don't need to type the whole thing."
+        ]
+        if? msg = "conversations" [
+            writeinfo "Help" "To choose an option in conversations, you have a few methods."
+            writeinfo "Help" "Either enter the index number of the option, the entire text as a match, or partial match. When using partial matching, be careful that the input doesn't also match another unintended option."
+        ]
+    ]
+]
+
+rollDice: function[syn][
+    if? in? "d" syn [
+        split.by: "d" 'syn
+        numOfDice: to :integer syn\0
+        sides: to :integer syn\1
+        total: 0
+        loop 1..numOfDice [x] [
+            nextRand: random 1 sides
+            writeln "Dice" ~"Die |color #yellow to :string x| is |color #yellow to :string nextRand|"
+            total: total + nextRand
+        ]
+        writeln "Dice" ~"Total is |color #yellow to :string total|."
+    ] else [
+        writeln "Dice" "Invalid syntax."
+    ]
+]
+
+saveUserVars: $[][
+    write.json userPath userVars
+]
+
 processInput: $[line args][
     unless storyVars\conv = "" [
         processConv strip ~"|line| |args|"
@@ -450,13 +606,13 @@ processInput: $[line args][
         when? [="talk"] -> talk args
         when? [="use"] -> use args
         when? [="north"] -> move "north"
-        when? [="n"] -> move "north"
+        ;when? [="n"] -> move "north"
         when? [="east"] -> move "east"
-        when? [="e"] -> move "east"
+        ;when? [="e"] -> move "east"
         when? [="south"] -> move "south"
-        when? [="s"] -> move "south"
+        ;when? [="s"] -> move "south"
         when? [="west"] -> move "west"
-        when? [="w"] -> move "west"
+        ;when? [="w"] -> move "west"
         when? [="up"] -> move "up"
         when? [="down"] -> move "down"
         when? [="in"] -> move "in"
@@ -466,14 +622,76 @@ processInput: $[line args][
         when? [="notes"] -> listnotes args
         when? [="note"] -> addnote args
         when? [="unnote"] -> deletenote args
-        when? [=".ac"] -> updateEntityAutocomplete true
+        when? [=".flip"] -> writeln "Coin" sample ["heads" "tails"]
+        when? [=".select"] -> writeln "Select" sample split.words args
+        when? [=".roll"] -> rollDice args
+        when? [=".ac"] -> updateEntityAutocomplete
         when? [=".get"] -> cmdGetUserVar args
+        when? [=".echo"] -> writeln "Echo" args
+        when? [=".alias"] [
+            parts: split.words args
+            baseCmd: parts\0
+            aliasAs: parts\1
+            writeln "System" ~"Created new alias for |baseCmd| as |aliasAs|."
+            userVars\aliases\[baseCmd]: aliasAs
+            saveUserVars
+        ]
+        when? [=".unalias"] [
+            writeln "System" ~"Deleted alias for |args|."
+            userVars\aliases: remove.key userVars\aliases args
+            saveUserVars
+        ]
+        when? [=".aliases"] [
+            loop userVars\aliases [k v] [
+                writeln "System" ~"|color #red k| = |color #blue v|"
+            ]
+        ]
+        when? [=".spoony"] [
+            userVars\dev: true
+            write.json userPath userVars
+            print "Dev mode enabled."
+        ]
+        when? [=".flag"] [
+            try? [
+                parts: split.words args
+                fname: parts\0
+                fv: parts\1
+            ]
+            else [
+                writeln "Xyzzy" "Format for command should include a flag name and a value."
+                return null
+            ]
+
+            try? [
+                setFlag fname fv
+                writeln "Xyzzy" ~"Flag set: |fname| = |fv|"
+            ] else [
+                writeln "Xyzzy" "Value should be a valid logical value. [1 0 true false]"
+            ]
+
+        ]
+        when? [=".smile"] [
+            print ":)"
+            terminal\prompt: ":) "
+
+        ]
         else -> print ~"What?"
 ]
 
+handleAliases: $[text][
+    parts: split.words text
+    len: size parts
+    loop 0..len-1 [x] [
+        t: parts\[x]
+        if contains? keys userVars\aliases t [
+            parts\[x]: userVars\aliases\[t]
+        ]
+    ]
+    return join.with: " " parts
+]
 triggerEvent #[
-    text: "You disembark from the police boat on to the Liberty Island Docks, ready for your first official mission."
-    messages: [
+    message: "You disembark from the police boat on to the Liberty Island Docks, ready for your first official mission."
+    texts: [
         "Alex Jacobson: Yo."
         "Alex Jacobson: Go `talk` to Paul, JC."
         "<Inner Voice>: Talk is an action I can do, right? I should type `talk` followed by the name of the person I want to talk to."
@@ -482,17 +700,21 @@ triggerEvent #[
 
 mainLoop: $[][
     set settings 'alive true
-
+    ;inspect script
     while [settings\alive][
         unless? storyVars\infoString = "" [
             writeinfo "Info" storyVars\infoString
         ]
+
         inp: input.repl
-                .complete: ac
-                .hint: hints
-                prompt
+                .complete: terminal\ac
+                .hint: terminal\hints
+                terminal\prompt
 
         if? inp <> "" [
+            unless? prefix? inp ".unalias" [
+                inp: handleAliases inp
+            ]
             arr: split.words inp
             cmd: arr\0
             arr: join.with:" " remove.once arr cmd

@@ -1,0 +1,4 @@
+
+techtest: function[] [
+    print "Inside techtest"
+]

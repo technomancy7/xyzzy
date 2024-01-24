@@ -1,11 +1,4 @@
-test: function[name][
-    inspect name
-    inspect attrs\watch
-    print attr "watch"
-    print attr "dead"
-]
+do.import {techno.art}
 
-test
-    .watch: "me"
-    .dead
-    "you"
+print "Imported"
+techtest

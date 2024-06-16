@@ -31,27 +31,30 @@ events {
     "hit_thing": "xyzzy.damage_object('{$}', 10);xyzzy.writeln('{$name} was damaged by {$inst}.')"
 }
 
-# idea
-string is evaluated in py eval(), give access to the xyzzy state object as `xyzzy`
-before eval: {$} is replaced with with id of target object, {$name} is replaced with name, {$inst} for instigator (i.e. player)
+# notebook
+note <text>
+forget (brings up choices of notes to delete)
+renote (brings up choices, then prompt for replacement)
+
+# quests
+functions for adding, checking, deleting, marking complete
+command for listing quests
+
 """
 # Main state class
 class Xyzzy:
-    def post_dialog(self, *, text = "", title = "Alert"):
-        message_dialog(title=title, text=text).run()
+    # Utils
+    def boolinate(self, v):
+        if type(v) == str:
+            v = v.lower()
 
-    def get_confirm(self, *, text="Are you sure?", title="Confirmation"):
-        return yes_no_dialog(title=title, text=text).run()
+        if v in ["yes", "y", "true", "t", 1, "1", "on"]:
+            return True
 
-    def get_input(self, *, text="Enter your response:", title="Input"):
-        return input_dialog(title=title, text=text).run()
+        if v in ["no", "n", "false", "f", 0, "0", "off"]:
+            return False
 
-    def get_choice(self, *, text="Select one option:", title="Choice", values=[]):
-        return radiolist_dialog(
-            title=title,
-            text=text,
-            values=values
-        ).run()
+        return False
 
     def _directions(self):
         'List of valid directions that zones can connect to'
@@ -77,6 +80,26 @@ class Xyzzy:
             case "west":
                 return "east"
 
+    # GUI
+    def post_dialog(self, *, text = "", title = "Alert"):
+        message_dialog(title=title, text=text).run()
+
+    def get_confirm(self, *, text="Are you sure?", title="Confirmation"):
+        return yes_no_dialog(title=title, text=text).run()
+
+    def get_input(self, *, text="Enter your response:", title="Input"):
+        return input_dialog(title=title, text=text).run()
+
+    def get_choice(self, *, text="Select one option:", title="Choice", values=[]):
+        return radiolist_dialog(title=title, text=text, values=values).run()
+
+    def bottom_toolbar(self):
+        l = self.location()
+        n = l.get("name", "Undefined")
+        d = l.get("description", "Undefined")
+        return HTML(f'<b><style bg="ansired">{n}</style></b>  {d}')
+
+    # Object creation
     def _create_actor(self, **opt):
         'Creates a raw new actor object.'
         actor = {
@@ -114,6 +137,7 @@ class Xyzzy:
         zone.update(**opt)
         return zone
 
+
     def make_actor(self, actor_id, **opts):
         'Creates a new actor and adds it to the registry'
         opts["id"] = actor_id
@@ -126,6 +150,8 @@ class Xyzzy:
         new_actor = self._create_zone(**opts)
         self.registry[zone_id] = new_actor
 
+
+    # State management
     def reset_state(self):
         self.story_title = ""
         self.story_description = ""
@@ -134,6 +160,10 @@ class Xyzzy:
         self.story_version = ""
 
         self.events = {}
+        self.player_save_data = { # container for any information that may be kept in a players save file
+            "goals": {},
+            "notebook": []
+        }
         self.registry = {} #All objects in the current state (actors and zones)
         self.vars = {} #Flags, switches, etc. Variables of the current state.
         self.focus = "" #The ID of the actor we're currently focused on, i.e. the Player
@@ -141,23 +171,33 @@ class Xyzzy:
         self.admin = False #If we're in editor mode or not
 
     def load_state(self, sid = ""):
+        if self.story_id == "": return self.writeln("Load failed, story requires ID.")
+
         if sid == "":
             sid = "0"
         sv_name = f"save_{self.story_id}_{sid}.json"
+        save_file = self.story_dir+"saves/"+sv_name
+        if not os.path.exists(save_file):
+            #print()
+            return self.writeln(f"Load failed, file not found. ({save_file})")
 
-        with open(self.story_dir+"saves/"+sv_name, "r") as f:
+        with open(save_file, "r") as f:
             js = json.load(f)
             if js["story_id"] == self.story_id:
                 self.registry = js['registry']
                 self.vars = js['vars']
                 self.focus = js['focus']
+                self.player_save_data = js['player_save_data']
                 self.writeln(f"State loaded from {sv_name}")
             else:
-                self.writeln("Story ID mismatch.")
+                self.writeln(f"Story ID mismatch. {js['story_id']} vs {self.story_id}")
 
     def save_state(self, sid = ""):
+        if self.story_id == "": return self.writeln("Save failed, story requires ID.")
+
         if sid == "":
             sid = "0"
+
         sv_name = f"save_{self.story_id}_{sid}.json"
 
         with open(self.story_dir+"saves/"+sv_name, "w+") as f:
@@ -165,22 +205,29 @@ class Xyzzy:
                 "story_id": self.story_id,
                 "registry": self.registry,
                 "vars": self.vars,
-                "focus": self.focus
+                "focus": self.focus,
+                "player_save_data": self.player_save_data
             }
             json.dump(js, f, indent=4)
             self.writeln(f"State saved to {sv_name}")
 
+
     def import_story(self, js):
+        self.reset_state()
         self.story_title = js.get("title", "Undefined")
         self.story_description = js.get("description", "Undefined")
         self.story_id = js.get("id", "Undefined")
         self.author = js.get("author", "Undefined")
         self.story_version = js.get("version", "Undefined")
-
+        self.protected = js.get("protected", False)
         self.events = js.get("events", {})
         self.registry = js.get("registry", {})
         self.vars = js.get("vars", {})
         self.focus = js.get("focus", "")
+
+        if self.protected and self.admin:
+            self.writeln("Edit mode is disabled for this story.")
+            self.admin = False
 
     def load_story(self, path):
         if not path.endswith(".json"):
@@ -189,9 +236,13 @@ class Xyzzy:
         if "\\" not in path and "/" not in path:
             path = self.story_dir+path
 
+        if not os.path.exists(os.path.expanduser(path)):
+            return self.writeln("Import failed, file not found.")
+
         with open(os.path.expanduser(path), "r") as f:
             self.import_story(json.load(f))
             self.writeln(f"Story imported: {path}")
+
 
     def export_story(self):
         # builds the json data of the story, used for editors to save an initial story state
@@ -203,6 +254,7 @@ class Xyzzy:
             "focus": self.focus,
             "template": True,
             "id": self.story_id,
+            "protected": self.protected,
 
             "events": self.events,
             "vars": self.vars,
@@ -212,6 +264,8 @@ class Xyzzy:
         return exported
 
     def save_story(self, path):
+        if self.story_id == "": return self.writeln("Export failed, story requires ID.")
+
         if not path.endswith(".json"):
             path = path+".json"
 
@@ -223,6 +277,15 @@ class Xyzzy:
             json.dump(d, f, indent=4)
             self.writeln(f"Story exported: {path}")
 
+
+    # Notes and Goals
+    def add_note(self, text):
+        if text not in self.player_save_data['notebook']:
+            self.player_save_data['notebook'].append(text)
+            self.writeln(text, source="Noted")
+
+
+    # Core
     def __init__(self, *, load_cli = True):
         # System
         self.home_dir = HERE
@@ -237,6 +300,7 @@ class Xyzzy:
             os.mkdir(self.story_dir+"saves/")
 
         # State
+        self.protected = False #TODO implement compiled stories that can't be manually edited
         self.reset_state()
 
         # Var to check if we're in the core CLI or not, used for interfaces to check features
@@ -257,28 +321,6 @@ class Xyzzy:
             self.running = False
             self.show_hud = True
             self.clear_screen = False
-
-    def move_actor(self, act_id, target_id):
-        if self.registry.get(act_id) and self.registry.get(target_id) and self.registry[act_id]['type'] == "actor":
-            for _, obj in self.registry.items():
-                if act_id in obj['contains']:
-                    obj['contains'].remove(act_id)
-                    #print(f"Removed object from location: {obj['id']}")
-
-                if obj['id'] == target_id:
-                    obj['contains'].append(act_id)
-                    #print(f"Added object to location: {obj['id']}")
-
-            self.registry[act_id]['location'] = target_id
-            #print(f"Updated location value: {self.registry[act_id]['location']}")
-
-    def link_zones(self, first_zone, direction, target_zone):
-        for _, zone in self.registry.items():
-            if zone["type"] == "zone" and zone['id'] == first_zone:
-                zone["exits"][direction]["target"] = target_zone
-
-            if zone["type"] == "zone" and zone['id'] == target_zone:
-                zone["exits"][self._reverse_direction(direction)]["target"] = first_zone
 
     def read(self, text:str):
         'Main entry point for interfacing with the engine. Reads a string command.'
@@ -370,26 +412,39 @@ class Xyzzy:
                     self.admin = False
 
                 case "events":
-                    self.writeln(self.events)
+                    self.writeln(" = Event Register = ")
+                    for k, v in self.events.items():
+                        self.writeln(f"{k} -> {v}")
+                    self.writeln("")
+                    self.writeln(" = Object Events =")
+                    for _, obj in self.registry.items():
+                        for k, v in obj.get("events", {}).items():
+                            self.writeln(f"{obj['id']} -> {k} -> {v}")
+
                 case "modify" | "mod" | "edit":
-                    vals = []
-                    for _, object in self.registry.items():
-                        vals.append((object['id'], object['name'] or object['id']))
+                    editor = ""
 
-                    editor = self.get_choice(values=vals)
+                    if line == "":
+                        vals = []
+                        for _, object in self.registry.items():
+                            vals.append((object['id'], f"{object['name']} {object['id']}"))
 
+                        editor = self.get_choice(values=vals)
+                    else:
+                        editor = line
                     while True:
                         key = self.get_input(text = f"Edit {self.registry[editor]['type']} {editor} key: (empty to end)")
 
-                        if key == "id":
-                            self.post_dialog(text = "ID can not be modified.")
+                        if key in ["id", "events"]:
+                            self.post_dialog(text = "key can not be modified.")
                             continue
 
                         if key == "" or key == None:
                             break
 
                         val = self.get_input(text = f"Set {key} value:")
-                        t = self.get_input(text = f"Set {key}={val} type: (str by default, int, float, list)")
+                        #t = self.get_input(text = f"Set {key}={val} type: (str by default, int, float, list)")
+                        t = self.get_choice(values=[("str", "str"), ("int", "int"), ("float", "float"), ("list", "list")])
                         if t == "int": val = int(val)
                         if t == "bool": val = self.boolinate(val)
                         if t == "float": val = float(val)
@@ -415,15 +470,16 @@ class Xyzzy:
                     while True:
                         key = self.get_input(text = f"Edit {new_type} {new_id} key: (empty to end)")
 
-                        if key == "id":
-                            self.post_dialog(text = "ID can not be modified.")
+                        if key in ["id", "events"]:
+                            self.post_dialog(text = "key can not be modified.")
                             continue
 
                         if key == "" or key == None:
                             break
 
                         val = self.get_input(text = f"Set {key} value:")
-                        t = self.get_input(text = f"Set {key}={val} type: (str by default, int, float, list)")
+                        #t = self.get_input(text = f"Set {key}={val} type: (str by default, int, float, list)")
+                        t = self.get_choice(values=[("str", "str"), ("int", "int"), ("float", "float"), ("list", "list")])
                         if t == "int": val = int(val)
                         if t == "bool": val = self.boolinate(val)
                         if t == "float": val = float(val)
@@ -465,11 +521,8 @@ class Xyzzy:
                         self.writeln("Direction invalid.", source="error")
 
                 case "export": #saves story file "export <file_path>"
-                    if line == "" and self.story_id != "":
-                        line = self.story_id
-
-                    if line == "": return self.writeln("Missing ID.")
-                    self.save_story(line)
+                    if self.story_id == "": return self.writeln("Missing ID.")
+                    self.save_story(self.story_id)
 
                 case "import": #imports story file to state "import <file_path>"
                     if line == "":
@@ -482,6 +535,11 @@ class Xyzzy:
 
                         line = self.get_choice(values=choices)
                     self.load_story(line)
+
+                case "eval":
+                    self.writeln("Enter code: (Alt-Enter to send)")
+                    code = prompt('> ', multiline=True)
+                    self._eval_code(code)
 
                 case "get":
                     if line != "":
@@ -571,18 +629,38 @@ class Xyzzy:
                         self.writeln("State reset.")
                         self.reset_state()
 
+                case ".loadstory": #imports story file to state "import <file_path>"
+                    if line == "":
+                        choices = []
+                        for file in os.listdir(self.story_dir):
+                            filename = os.fsdecode(file)
+                            if filename.endswith(".json"):
+                                choices.append((filename, filename))
+
+
+                        line = self.get_choice(values=choices)
+                    self.load_story(line)
+
                 case ".save" | ".s":
-                    self.writeln("Saving.")
+                    self.writeln("Saving...")
                     self.save_state(line)
 
                 case ".load" | ".l":
-                    self.writeln("Loading.")
+                    self.writeln("Loading...")
                     self.load_state(line)
 
                 case ".edit" | ".admin":
+                    if self.protected:
+                        return self.writeln("Edit mode is disabled for this story.")
                     self.writeln("Switched to Admin mode.")
                     self.admin = True
 
+                case "note":
+                    self.add_note(line)
+
+                case "notes" | "notebook":
+                    for note in self.player_save_data['notebook']:
+                        self.writeln(note, source="Note")
                 case "move": #move player in set direction "move <direction>"
                     #alias shortcuts populated from directions as overflow custom commands, n, north etc
                     pass
@@ -590,21 +668,27 @@ class Xyzzy:
                 case "inventory":
                     player = self.get_object(self.focus)
                     print(player['contains'])
+
                 case "look":
+                    # TODO make a version in admin mode which shows the ID's
                     l = self.location()
                     self.writeln(f"You are in {l['name']}.")
                     if l['description']:
                         self.writeln(f"<i>{l['description']}</i>")
 
+                    for d, exit in l['exits'].items():
+                        if exit['target']:
+                            self.writeln(f"You can see {self.get_name(exit['target'], False)} to the {d}.")
                     items = []
                     for i in l['contains']:
                         if i != self.focus:
                             items.append(i)
 
                     if len(items) > 0:
-                        self.writeln("You can see:")
-                        item_names = [self.get_object(item)['name'] for item in items]
-                        self.writeln(", ".join(item_names))
+
+                        item_names = [self.get_name(item) for item in items]
+                        self.writeln(f"You can see {', '.join(item_names)}")
+                        #self.writeln()
 
                 case "take": #picks up object if object can be taken "take <object name>"
                     loc = self.location()
@@ -643,6 +727,7 @@ class Xyzzy:
                     pass
 
     def _eval_code(self, code, **opts):
+        #print("EVAL ", code)
         env = {
             "xyzzy": self,
             "eval": None,
@@ -655,40 +740,9 @@ class Xyzzy:
         env.update(**opts)
         eval(code, env)
 
-    def trigger_event(self, obj_id, name, **opts):
-        obj = self.get_object(obj_id)
-        evts = obj['events'].get(name, [])
-
-        for evt in evts:
-            if evt.startswith("g:"):
-                code = self.events.get(evt.split(":")[1])
-                code = code.replace("{$}", obj_id)
-                self._eval_code(code, **opts)
-            else:
-                code = evt.replace("{$}", obj_id)
-                self._eval_code(evt, **opts)
-
-    def boolinate(self, v):
-        if type(v) == str:
-            v = v.lower()
-
-        if v in ["yes", "y", "true", "t", 1, "1", "on"]:
-            return True
-
-        if v in ["no", "n", "false", "f", 0, "0", "off"]:
-            return False
-
-        return False
-
     def writeln(self, text, source = "Xyzzy", colour = "skyblue", text_prefix = "", text_suffix = "", prefix = ""):
         if len(prefix) > 3: prefix = prefix[:3]
         print_formatted_text(HTML(f'{prefix}{' '*(3-len(prefix))}<{colour}>[{source}]</{colour}>\t{text_prefix}{text}{text_suffix}'))
-
-    def bottom_toolbar(self):
-        l = self.location()
-        n = l.get("name", "Undefined")
-        d = l.get("description", "Undefined")
-        return HTML(f'<b><style bg="ansired">{n}</style></b>  {d}')
 
     def run(self):
         'Default command-line shell interface'
@@ -710,16 +764,89 @@ class Xyzzy:
                 print("bye") # TODO save data here
                 self.running = False
 
+    def set_var(self, key, value):
+        self.vars[key] = value
+
+    def touch_var(self, key, default_var = None):
+        return self.vars.get(key, default_var)
+
+    def add_autocomplete(self, word:str):
+        self.autocomplete.words.append(word)
+
+    def set_autocomplete(self, ar:list):
+        self.autocomplete.words = ar
+
+
+    # Object management
+    def move_actor(self, act_id, target_id):
+        if self.registry.get(act_id) and self.registry.get(target_id) and self.registry[act_id]['type'] == "actor":
+            for _, obj in self.registry.items():
+                if act_id in obj['contains']:
+                    obj['contains'].remove(act_id)
+                    #print(f"Removed object from location: {obj['id']}")
+
+                if obj['id'] == target_id:
+                    obj['contains'].append(act_id)
+                    #print(f"Added object to location: {obj['id']}")
+
+            self.registry[act_id]['location'] = target_id
+            #print(f"Updated location value: {self.registry[act_id]['location']}")
+
+    def link_zones(self, first_zone, direction, target_zone):
+        for _, zone in self.registry.items():
+            if zone["type"] == "zone" and zone['id'] == first_zone:
+                zone["exits"][direction]["target"] = target_zone
+
+            if zone["type"] == "zone" and zone['id'] == target_zone:
+                zone["exits"][self._reverse_direction(direction)]["target"] = first_zone
+
+    def tagged(self, obj_id, tag):
+        if self.registry.get(obj_id):
+            return tag in self.registry[obj_id].get("tags", [])
+
+    def tag(self, obj_id, new_tag):
+        if self.registry.get(obj_id):
+            if new_tag not in self.registry[obj_id].get("tags", []):
+                self.registry[obj_id].get("tags", []).append(new_tag)
+
+    def untag(self, obj, tag):
+        if self.registry.get(obj_id):
+            if new_tag in self.registry[obj_id].get("tags", []):
+                self.registry[obj_id].get("tags", []).remove(new_tag)
+
+    def get_name(self, obj_id, include_article = True):
+        if include_article:
+            obj = self.registry.get(obj_id, {})
+            return obj.get("article", "a")+" "+obj.get("name", "")
+        else:
+            return self.registry.get(obj_id, {}).get("name", "")
+
+    def trigger_event(self, obj_id, name, **opts):
+        obj = self.get_object(obj_id)
+        evts = obj['events'].get(name, [])
+
+        for evt in evts:
+            if evt.startswith("g:"):
+                code = self.events.get(evt.split(":")[1])
+                code = code.replace("{$}", obj_id)
+                self._eval_code(code, **opts)
+            else:
+                code = evt.replace("{$}", obj_id)
+                self._eval_code(evt, **opts)
+
     def get_object(self, id):
         return self.registry.get(id, None)
 
     def location(self, obj_id = ""):
         'returns location object of the target, focus by default'
         if obj_id == "": obj_id = self.focus
-        loc = self.get_object(self.get_object(obj_id)['location'])
+        #print("Getting loc of", obj_id)
+        obj = self.get_object(obj_id)
+        if obj:
+            loc = self.get_object(obj['location'])
 
-        if loc:
-            return loc
+            if loc:
+                return loc
 
         # If no location is found, return an empty default object, to try and prevent errors
         return self._create_zone()
@@ -733,15 +860,3 @@ class Xyzzy:
         foc = self.get_object(self.focus)
         if foc: return foc['name']
         return "Player"
-
-    def set_var(self, key, value):
-        self.vars[key] = value
-
-    def touch_var(self, key, default_var = None):
-        return self.vars.get(key, default_var)
-
-    def add_autocomplete(self, word:str):
-        self.autocomplete.words.append(word)
-
-    def set_autocomplete(self, ar:list):
-        self.autocomplete.words = ar

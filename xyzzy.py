@@ -9,7 +9,7 @@ sys.path.append(HERE+"lib/")
 
 # UI libraries
 from prompt_toolkit import prompt, PromptSession, print_formatted_text, HTML
-from prompt_toolkit.completion import WordCompleter
+from prompt_toolkit.completion import WordCompleter, NestedCompleter
 from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from prompt_toolkit.shortcuts import yes_no_dialog, input_dialog, radiolist_dialog, message_dialog
@@ -170,7 +170,7 @@ class Xyzzy:
 
         self.admin = False #If we're in editor mode or not
 
-    def load_state(self, sid = ""):
+    def load_state(self, sid = "", *, destructive = False):
         if self.story_id == "": return self.writeln("Load failed, story requires ID.")
 
         if sid == "":
@@ -184,10 +184,27 @@ class Xyzzy:
         with open(save_file, "r") as f:
             js = json.load(f)
             if js["story_id"] == self.story_id:
-                self.registry = js['registry']
-                self.vars = js['vars']
+                # If Destructive, completely overwrite the existing state with the prior state
+                # Usually this is fine, but if a story template was changed, a non-destructive load is better
+                # This inserts the prior state while generally preserving any changes in the template
+                # For example: if a template adds new objects, a destructive load would erase the new objects
+                #              while a non-destructive load would merely add the individual keys of the prior state
+                #              and will not touch any new keys
+
                 self.focus = js['focus']
                 self.player_save_data = js['player_save_data']
+
+                if destructive:
+                    self.registry = js['registry']
+                    self.vars = js['vars']
+
+                else:
+                    for k, v in js['registry'].items():
+                        self.registry[k] = v
+
+                    for k, v in js['vars'].items():
+                        self.vars[k] = v
+
                 self.writeln(f"State loaded from {sv_name}")
             else:
                 self.writeln(f"Story ID mismatch. {js['story_id']} vs {self.story_id}")
@@ -284,7 +301,23 @@ class Xyzzy:
             self.player_save_data['notebook'].append(text)
             self.writeln(text, source="Noted")
 
+    def add_goal(self, goal_id, **opts):
+        self.player_save_data["goals"][goal_id] = {
+            "text": "",
+            "state": 0, # -2 = failed, -1 = not shown, 0 = in-progress, 1 = complete
+            "state_change": None, # either event name string, or callable object taking goal and state params
+        }
+        self.player_save_data["goals"][goal_id].update(**opts)
 
+    def set_goal_state(self, goal_id, new_state:int):
+        if self.player_save_data["goals"].get(goal_id):
+            self.player_save_data["goals"][goal_id]['state'] = int(new_state)
+            if self.player_save_data["goals"][goal_id].get("state_change"):
+                if callable(self.player_save_data["goals"][goal_id]["state_change"]):
+                    self.player_save_data["goals"][goal_id]["state_change"](goal = goal_id, state = new_state)
+
+                if type(self.player_save_data["goals"][goal_id]["state_change"]) == str:
+                    self.trigger_global_event(self.player_save_data["goals"][goal_id]["state_change"], goal = goal_id, state = new_state)
     # Core
     def __init__(self, *, load_cli = True):
         # System
@@ -308,7 +341,8 @@ class Xyzzy:
 
         # CLI
         if load_cli:
-            self.autocomplete = WordCompleter([], ignore_case=True)
+            #self.autocomplete = WordCompleter([], ignore_case=True)
+            self.autocomplete = NestedCompleter.from_nested_dict({})
             bindings = KeyBindings()
 
             @bindings.add('c-t')
@@ -410,6 +444,24 @@ class Xyzzy:
                 case ".play" | ".p" | ".":
                     self.writeln("Switched to Player mode.")
                     self.admin = False
+
+                case "goals":
+                    for k, goal in self.player_save_data['goals'].items():
+                        self.writeln(goal)
+
+                case "setgoal":
+                    goal_id = line.split(" ")[0]
+                    new_state = int(line.split(" ")[1])
+                    self.set_goal_state(goal_id, new_state)
+
+
+                case "goal":
+                    gid = self.get_input(text = "Define goal unique ID")
+                    gtext = self.get_input(text = "Define goal text")
+                    gis = self.get_choice(text = "Define goal initial state", values = [("-2", "-2"), ("-1", "-1"), ("0", "0"), ("1", "1")])
+                    gsc = self.get_input(text = "Define goal state change event")
+                    self.writeln(f"Goal Added: {gid} -> {gtext} ({gis}) -> {gsc}")
+                    self.add_goal(gid, text = gtext, state = int(gis), state_change = gsc)
 
                 case "events":
                     self.writeln(" = Event Register = ")
@@ -515,8 +567,20 @@ class Xyzzy:
                     tz = line.split(" ")[2]
 
                     if dr in self._directions():
+                        #self.writeln(f"SANITY CHECK: Attempting unlink {fz} via {dr}")
+                        #self.unlink_zones(fz, dr) #sanity check, make sure old references don't exist before writing new routes
                         self.writeln(f"Connecting {fz} to {tz} via {dr} route.")
                         self.link_zones(fz, dr, tz)
+                    else:
+                        self.writeln("Direction invalid.", source="error")
+
+                case "unlink": #connects two zones "link <zone_1_id> <direction> <zone_2_id>"
+                    fz = line.split(" ")[0]
+                    dr = line.split(" ")[1]
+
+                    if dr in self._directions():
+                        self.writeln(f"Disconnecting {fz} {dr} route.")
+                        self.unlink_zones(fz, dr)
                     else:
                         self.writeln("Direction invalid.", source="error")
 
@@ -583,6 +647,9 @@ class Xyzzy:
                         for _, obj in self.registry.items():
                             if obj['type'] == 'zone':
                                 self.writeln(f"{obj['id']}")
+                                for di, ex in obj['exits'].items():
+                                    if ex['target']:
+                                        self.writeln(f" -> {di} -> {ex['target']} ({ex['lock']})")
                 case "focus":
                     if line == "":
                         return self.writeln(self.focus)
@@ -655,15 +722,43 @@ class Xyzzy:
                     self.writeln("Switched to Admin mode.")
                     self.admin = True
 
+                case "goals":
+                    for k, goal in self.player_save_data['goals'].items():
+                        if goal['state'] == 1:
+                            self.writeln(goal['text'], source="Goal")
+
+                        if line == "!" and goal['state'] == 2:
+                            self.writeln(f"<s>{goal['text']}</s>", source="Goal")
+
+
                 case "note":
                     self.add_note(line)
 
                 case "notes" | "notebook":
                     for note in self.player_save_data['notebook']:
                         self.writeln(note, source="Note")
+
+                case "unnote":
+                    if len(self.player_save_data['notebook']) == 0: return self.writeln("No notes to remove.")
+
+                    choices = []
+                    for i, note in enumerate(self.player_save_data['notebook']):
+                        choices.append((i, note))
+
+                    to_remove = self.get_choice(values=choices)
+                    self.writeln(f"Removed note: {self.player_save_data['notebook'][to_remove]}.")
+                    self.player_save_data['notebook'].remove(self.player_save_data['notebook'][to_remove])
+
                 case "move": #move player in set direction "move <direction>"
                     #alias shortcuts populated from directions as overflow custom commands, n, north etc
-                    pass
+                    if line in self._directions():
+                        loc = self.location()
+                        e = loc['exits'][line]
+                        if e['target']:
+                            if e['lock']:
+                                return self.writeln(f"You can't go that way. {e['lock']}")
+
+                            self.writeln(f"Moving to {e['target']}.")
 
                 case "inventory":
                     player = self.get_object(self.focus)
@@ -699,7 +794,7 @@ class Xyzzy:
                         if line.lower() == name.lower() and "inventory" in obj['tags']:
                             self.move_actor(i, self.focus)
                             self.writeln(obj['name'], source="Take")
-                            self.trigger_event(obj['id'], "taken", target = obj['id'], instigator = self.focus)
+                            self.trigger_object_event(obj['id'], "taken", target = obj['id'], instigator = self.focus)
                             return
 
                 case "drop": #drops item from ivnentory in to current zone if not restricted "drop <name>"
@@ -727,7 +822,6 @@ class Xyzzy:
                     pass
 
     def _eval_code(self, code, **opts):
-        #print("EVAL ", code)
         env = {
             "xyzzy": self,
             "eval": None,
@@ -747,6 +841,7 @@ class Xyzzy:
     def run(self):
         'Default command-line shell interface'
         self.running = True
+        self.rebuild_autocomplete()
 
         while self.running:
             try:
@@ -759,6 +854,7 @@ class Xyzzy:
                 )
                 if self.clear_screen: self.console.clear()
                 self.read(text)
+                self.rebuild_autocomplete()
 
             except KeyboardInterrupt:
                 print("bye") # TODO save data here
@@ -769,6 +865,41 @@ class Xyzzy:
 
     def touch_var(self, key, default_var = None):
         return self.vars.get(key, default_var)
+
+    def rebuild_autocomplete(self):
+        loc = self.location()
+
+        if self.admin:
+            acd = {
+                "link": {},
+            }
+
+            for k, v in self.registry.items():
+                if v['type'] == "zone":
+                    acd['link'][k] = {}
+                    for d in self._directions():
+                        acd['link'][k][d] = {}
+                        for sk, sv in self.registry.items():
+                            if sv['type'] == "zone":
+                                acd['link'][k][d][sk] = None
+        else:
+            acd = {
+                "move": {},
+                "take": {},
+                "drop": {},
+            }
+
+            for k, v in self.registry.items():
+                if v['type'] == "actor" and v['location'] == loc['id'] and "inventory" in v['tags']:
+                    acd['take'][v['name']] = None
+
+                if v['type'] == "actor" and v['location'] == self.focus and "inventory" in v['tags']:
+                    acd['drop'][v['name']] = None
+
+            for d in self._directions():
+                acd['move'][d] = None
+
+        self.autocomplete = NestedCompleter.from_nested_dict(acd)
 
     def add_autocomplete(self, word:str):
         self.autocomplete.words.append(word)
@@ -791,6 +922,18 @@ class Xyzzy:
 
             self.registry[act_id]['location'] = target_id
             #print(f"Updated location value: {self.registry[act_id]['location']}")
+
+    def unlink_zones(self, first, direction):
+        fz = self.get_object(first)
+        if fz == None or fz['type'] != "zone":
+            return self.writeln(f"Object {first} is not a valid zone.")
+
+        other = self.get_object(fz['exits'][direction]['target'])
+        if other:
+            self.writeln(f"Severing connection between {first} and {other['id']} via {direction} route.")
+            other['exits'][self._reverse_direction(direction)]['target'] = ""
+            fz['exits'][direction]['target'] = ""
+
 
     def link_zones(self, first_zone, direction, target_zone):
         for _, zone in self.registry.items():
@@ -821,18 +964,26 @@ class Xyzzy:
         else:
             return self.registry.get(obj_id, {}).get("name", "")
 
-    def trigger_event(self, obj_id, name, **opts):
-        obj = self.get_object(obj_id)
-        evts = obj['events'].get(name, [])
-
-        for evt in evts:
-            if evt.startswith("g:"):
-                code = self.events.get(evt.split(":")[1])
-                code = code.replace("{$}", obj_id)
-                self._eval_code(code, **opts)
-            else:
-                code = evt.replace("{$}", obj_id)
+    def trigger_global_event(self, name, **opts):
+        print("Triggering", name, opts)
+        for k, evt in self.events.items():
+            if k == name:
+                #code = evt.replace("{$}", obj_id)
                 self._eval_code(evt, **opts)
+
+    def trigger_object_event(self, obj_id, name, **opts):
+        obj = self.get_object(obj_id)
+        if obj.get("events"):
+            evts = obj['events'].get(name, [])
+
+            for evt in evts:
+                if evt.startswith("g:"):
+                    code = self.events.get(evt.split(":")[1])
+                    code = code.replace("{$}", obj_id)
+                    self._eval_code(code, **opts)
+                else:
+                    code = evt.replace("{$}", obj_id)
+                    self._eval_code(evt, **opts)
 
     def get_object(self, id):
         return self.registry.get(id, None)

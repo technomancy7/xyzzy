@@ -14,7 +14,11 @@ from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from prompt_toolkit.shortcuts import yes_no_dialog, input_dialog, radiolist_dialog, message_dialog, clear
 from prompt_toolkit.key_binding import KeyBindings
-from dotenv import load_dotenv, set_key
+from dotenv import load_dotenv, set_key, dotenv_values
+from ascii_canvas import canvas
+from ascii_canvas import item
+import importlib
+
 
 """
 TODO
@@ -139,6 +143,8 @@ class Xyzzy:
         self.author = ""
         self.story_version = ""
 
+        self.features = []
+        self.maps = {}
         self.events = {}
         self.player_save_data = { # container for any information that may be kept in a players save file
             "goals": {},
@@ -147,7 +153,7 @@ class Xyzzy:
         self.registry = {} #All objects in the current state (actors and zones)
         self.vars = {} #Flags, switches, etc. Variables of the current state.
         self.focus = "" #The ID of the actor we're currently focused on, i.e. the Player
-
+        self.scene = None
         self.admin = False #If we're in editor mode or not
 
     def load_state(self, sid = "", *, destructive = False):
@@ -173,6 +179,7 @@ class Xyzzy:
 
                 self.focus = js['focus']
                 self.player_save_data = js['player_save_data']
+                self.maps = js['maps']
 
                 if destructive:
                     self.registry = js['registry']
@@ -203,7 +210,8 @@ class Xyzzy:
                 "registry": self.registry,
                 "vars": self.vars,
                 "focus": self.focus,
-                "player_save_data": self.player_save_data
+                "player_save_data": self.player_save_data,
+                "maps": self.maps
             }
             json.dump(js, f, indent=4)
             self.writeln(f"State saved to {sv_name}")
@@ -221,10 +229,39 @@ class Xyzzy:
         self.registry = js.get("registry", {})
         self.vars = js.get("vars", {})
         self.focus = js.get("focus", "")
+        self.maps = js.get("maps", "")
+        self.features = js.get("features", [])
+
+        self.scenes = {}
+        
+        for feature in self.features:
+            mod = importlib.import_module(f"extensions.{feature}")
+
+            try:
+                for scene in mod.XYZZY['scenes']:
+                    self.scenes[scene.__name__] = scene
+                self.writeln(f"Loading extension: {mod.__name__}")
+            except:
+                pass
 
         if self.protected and self.admin:
             self.writeln("Edit mode is disabled for this story.")
             self.admin = False
+
+    def clear_scene(self):
+        if self.scene != None and hasattr(self.scene, "__exit_scene__"):
+            self.scene.__exit_scene__()
+        self.scene = None
+
+    def set_scene(self, name):
+        if self.scene != None and hasattr(self.scene, "__exit_scene__"):
+            self.scene.__exit_scene__()
+
+        if self.scenes.get(name):
+            self.scene = self.scenes[name](self)
+            if hasattr(self.scene, "__enter_scene__"):
+                self.scene.__enter_scene__()
+
 
     def load_story(self, path):
         if not path.endswith(".json"):
@@ -252,7 +289,9 @@ class Xyzzy:
             "template": True,
             "id": self.story_id,
             "protected": self.protected,
+            "maps": self.maps,
 
+            "features": self.features,
             "events": self.events,
             "vars": self.vars,
             "registry": self.registry
@@ -298,6 +337,7 @@ class Xyzzy:
 
                 if type(self.player_save_data["goals"][goal_id]["state_change"]) == str:
                     self.trigger_global_event(self.player_save_data["goals"][goal_id]["state_change"], goal = goal_id, state = new_state)
+
     # Core
     def __init__(self, *, load_cli = True):
         # System
@@ -313,25 +353,99 @@ class Xyzzy:
             os.mkdir(self.story_dir+"saves/")
 
         if not os.path.exists(self.story_dir+".env"):
-            open(self.story_dir+".env", "w+").close()
+            with open(self.story_dir+".env", "w+") as f:
+                f.write(textwrap.dedent("""\
+                # Set true to disable auto-complete. (Default: false)
+                XYZZY_DISABLE_AC='false'
+
+                # Set true to disable terminal status bar. (Default: false)
+                XYZZY_DISABLE_STATUSBAR='false'
+
+                # Set true to disable terminal clearing every turn. (Default: false)
+                XYZZY_DISABLE_CLS='false'
+                """))
 
         load_dotenv(dotenv_path=self.story_dir+".env")
+
+        if not os.path.exists(self.story_dir+".aliases"):
+            with open(self.story_dir+".aliases", "w+") as f:
+                f.write(textwrap.dedent("""\
+                    # Atomic aliases, if the value starts with '!', if the entire line is the key, the line becomes the value
+                    north='!move north'
+                    n='!move north'
+
+                    east='!move east'
+                    e='!move east'
+
+                    south='!move south'
+                    s='!move south'
+
+                    west='!move west'
+                    w='!move west'
+
+                    in='!move in'
+                    i='!move in'
+
+                    out='!move out'
+                    o='!move out'
+
+                    up='!move up'
+                    u='!move up'
+
+                    down='!move down'
+                    d='!move down'
+
+                    inv='!inventory'
+
+                    sv='!save'
+                    ld='!load'
+
+                    # Partial aliases, if any word in the line is the key, that word becomes the value
+                    nrth='north'
+                    sth='south'
+                    wst='west'
+                    dwn='down'
+                """))
+
+
 
         self.config = {
             "disable_autocomplete": self.boolinate(os.environ.get("XYZZY_DISABLE_AC", "false")),
             "disable_statusbar": self.boolinate(os.environ.get("XYZZY_DISABLE_STATUSBAR", "false")),
             "disable_cls": self.boolinate(os.environ.get("XYZZY_DISABLE_CLS", "false")),
         }
+
         # State
         self.protected = False #TODO implement compiled stories that can't be manually edited
         self.reset_state()
 
+        if not os.path.exists(self.story_dir+"extensions/"):
+            os.mkdir(self.story_dir+"extensions/")
+
+        sys.path.append(self.story_dir)
+
+        self.scenes = {}
+        self.scene = None
+        """for file in os.listdir(self.home_dir+"extensions/"):
+            filename = os.fsdecode(file)
+            if filename.endswith(".py"):
+                print("home "+filename)
+
+        for file in os.listdir(self.story_dir+"extensions/"):
+            filename = os.fsdecode(file)
+            if filename.endswith(".py"):
+                print("story "+filename)"""
+
+
         # Var to check if we're in the core CLI or not, used for interfaces to check features
         self.cli = load_cli
 
+        self.aliases = dotenv_values(self.story_dir+".aliases")
+        self.prompt = "(> "
+        self.running = False
+
         # CLI
         if load_cli:
-            #self.autocomplete = WordCompleter([], ignore_case=True)
             self.autocomplete = NestedCompleter.from_nested_dict({})
             bindings = KeyBindings()
 
@@ -341,18 +455,40 @@ class Xyzzy:
                 print(self.running, event)
 
             self.session = PromptSession(history=InMemoryHistory(), key_bindings=bindings)
-            self.prompt = "(> "
-            self.running = False
+
+    def build_map(self, label):
+        "Returns a map canvas"
+        #0 - left/right, 1 - up/down
+        map = self.maps.get(label)
+        if map:
+            map_canvas = canvas.Canvas()
+            for k, v in map.items():
+                if k.startswith("_"):
+                    map_canvas.add_item(item.Line(start=v[0], end=v[1]))
+                else:
+                    label = f"+{'-'*len(k)}+\n|{k}|\n+{'-'*len(k)}+"
+                    map_canvas.add_item(item.Item(label, position=v))
+            return map_canvas
 
     def read(self, text:str):
         'Main entry point for interfacing with the engine. Reads a string command.'
+
+        if text in self.aliases.keys() and self.aliases[text].startswith("!"):
+            text = self.aliases[text][1:]
+
+        parts = text.split()
+        for i, word in enumerate(parts):
+            if word in self.aliases.keys() and not self.aliases[word].startswith("!"):
+                parts[i] = self.aliases[word]
+
+        text = " ".join(parts)
         self.writeln(f"{text}", source=self.focus_name(), colour="yellow", prefix = " * ", text_suffix="</grey>", text_prefix="<grey>")
 
         if len(text) == 0:
             return
 
-        if self.redirect != None:
-            self.redirect(text)
+        if self.scene != None and hasattr(self.scene, "read"):
+            self.scene.read(text)
             return
 
         cmd = shlex.split(text)[0]
@@ -361,16 +497,16 @@ class Xyzzy:
         #TODO have core commands and then overflow commands read from a table
         if self.admin:
             match cmd:
-                case ".help":
+                case "help":
                     if line == "":
-                        self.writeln(".info .play modify create delete move link export import")
+                        self.writeln("info play modify create delete move link export import")
                         self.writeln("set focus title author version description id")
                     else:
                         match line:
-                            case ".info":
+                            case "info":
                                 self.writeln("Shows story info.", source=".info")
 
-                            case ".play":
+                            case "play":
                                 self.writeln("Switches to player mode.", source=".play")
 
                             case "modify" | "mod" | "edit":
@@ -422,6 +558,13 @@ class Xyzzy:
                             case "author" | "description" | "id" | "title" | "version":
                                 self.writeln("Updates story metadata", source=line)
                                 self.writeln("Arguments: new_value", source=line)
+
+                case ".scene":
+                    if line == "":
+                        self.clear_scene()
+                    else:
+                        self.set_scene(line)
+
                 case "info":
                     self.writeln(f"Story: {self.story_title or "Undefined"} ({self.story_id}{self.story_version or "Undefined"})")
                     self.writeln(f"<i>{self.story_description or "Undefined"}</i>")
@@ -429,7 +572,7 @@ class Xyzzy:
 
                     self.writeln(f"Focus: {self.focus or "Undefined"}")
 
-                case ".play" | ".p" | ".":
+                case "play" | "p":
                     self.writeln("Switched to Player mode.")
                     self.admin = False
 
@@ -681,15 +824,22 @@ class Xyzzy:
                     v = self.get_input(text="Set Environ value:")
                     set_key(self.story_dir+".env", k, v)
 
-                case ".alert":
-                    self.post_dialog(text=line)
-
                 case ".reset":
                     if self.get_confirm():
                         self.writeln("State reset.")
                         self.reset_state()
 
-                case ".loadstory": #imports story file to state "import <file_path>"
+                case "map":
+                    cvs = self.build_map(line)
+                    if cvs:
+                        self.writeln(f"\n{cvs.render()}", source="Map")
+                    else:
+                        self.writeln("Map not found.")
+
+                case "alert":
+                    self.post_dialog(text=line)
+
+                case "import": #imports story file to state "import <file_path>"
                     if line == "":
                         choices = []
                         for file in os.listdir(self.story_dir):
@@ -699,17 +849,18 @@ class Xyzzy:
 
 
                         line = self.get_choice(values=choices)
+
                     self.load_story(line)
 
-                case ".save" | ".s":
+                case "save":
                     self.writeln("Saving...")
                     self.save_state(line)
 
-                case ".load" | ".l":
+                case "load":
                     self.writeln("Loading...")
                     self.load_state(line)
 
-                case ".edit" | ".admin":
+                case "edit" | "admin":
                     if self.protected:
                         return self.writeln("Edit mode is disabled for this story.")
                     self.writeln("Switched to Admin mode.")
@@ -743,7 +894,6 @@ class Xyzzy:
                     self.player_save_data['notebook'].remove(self.player_save_data['notebook'][to_remove])
 
                 case "move": #move player in set direction "move <direction>"
-                    #alias shortcuts populated from directions as overflow custom commands, n, north etc
                     if line in self._directions():
                         loc = self.location()
                         e = loc['exits'][line]
@@ -755,7 +905,14 @@ class Xyzzy:
 
                 case "inventory":
                     player = self.get_object(self.focus)
-                    print(player['contains'])
+                    if line == "full":
+                        for item in player['contains']:
+                            obj = self.get_object(item)
+                            self.writeln(f"{obj['name']} - {obj['description']}")
+                            self.writeln(f"Tags: {obj['tags']}")
+                            self.writeln("")
+                    else:
+                        self.writeln(", ".join([self.get_object(item)['name'] for item in player['contains']]))
 
                 case "look":
                     # TODO make a version in admin mode which shows the ID's
@@ -788,7 +945,6 @@ class Xyzzy:
                             self.move_actor(i, self.focus)
                             self.writeln(obj['name'], source="Take")
                             self.trigger_object_event(obj['id'], "taken", target = obj['id'], instigator = self.focus)
-                            return
 
                 case "drop": #drops item from ivnentory in to current zone if not restricted "drop <name>"
                     loc = self.get_object(self.focus)
@@ -797,22 +953,60 @@ class Xyzzy:
                         name = obj['name']
                         if line.lower() == name.lower() and "inventory" in obj['tags']:
                             self.move_actor(i, loc['location'])
-                            return self.writeln(obj['name'], source="Drop")
+                            self.writeln(obj['name'], source="Drop")
+                            self.trigger_object_event(obj['id'], "dropped", target = obj['id'], instigator = self.focus)
 
                 case "equip" | "wear": #if item in inventory is equippable, set as equipped
-                    pass
+                    loc = self.get_object(self.focus)
+                    for i in loc['contains']:
+                        obj = self.get_object(i)
+                        name = obj['name']
+                        if line.lower() == name.lower() and "equipment" in obj['tags'] and "equipped" not in obj["tags"]:
+                            obj['tags'].append("equipped")
+                            self.writeln(obj['name'], source="Equipped")
+                            self.trigger_object_event(obj['id'], "equipped", target = obj['id'], instigator = self.focus)
 
                 case "unequip" | "unwear": #if item is equipped, remove
-                    pass
+                    loc = self.get_object(self.focus)
+                    for i in loc['contains']:
+                        obj = self.get_object(i)
+                        name = obj['name']
+                        if line.lower() == name.lower() and "equipment" in obj['tags'] and "equipped" in obj["tags"]:
+                            if "locked" in obj['tags']:
+                                return self.writeln(f"{obj['name']} can't be removed.")
+
+                            obj['tags'].remove("equipped")
+                            self.writeln(obj['name'], source="Unequipped")
+                            self.trigger_object_event(obj['id'], "unequipped", target = obj['id'], instigator = self.focus)
 
                 case "use": #if item in inventory is usable, use it
-                    pass
+                    loc = self.get_object(self.focus)
+                    for i in loc['contains']:
+                        obj = self.get_object(i)
+                        name = obj['name']
+                        if line.lower() == name.lower():
+                            self.writeln(obj['name'], source="Used")
+                            self.trigger_object_event(obj['id'], "used", target = obj['id'], instigator = self.focus)
 
                 case "talk" | "speak": #if actor in zone is talkable, talk
-                    pass
+                    loc = self.location()
+                    for i in loc['contains']:
+                        obj = self.get_object(i)
+                        name = obj['name']
+                        #print(obj)
+                        if line.lower() == name.lower():
+                            self.writeln(obj['name'], source="Talk")
+                            self.trigger_object_event(obj['id'], "talked", target = obj['id'], instigator = self.focus)
 
                 case "hit" | "strike": #hits actor in zone, damage if damageable, activate event if exists
-                    pass
+                    loc = self.location()
+                    for i in loc['contains']:
+                        obj = self.get_object(i)
+                        name = obj['name']
+                        #print(obj)
+                        if line.lower() == name.lower():
+                            self.writeln(obj['name'], source="Striked")
+                            self.trigger_object_event(obj['id'], "hit", target = obj['id'], instigator = self.focus)
 
     def _eval_code(self, code, **opts):
         env = {
@@ -836,6 +1030,9 @@ class Xyzzy:
         self.running = True
         self.rebuild_autocomplete()
         if not self.config.get("disable_cls"): clear()
+
+        # TODO story intro here
+
         while self.running:
             try:
                 hud = None
@@ -881,6 +1078,8 @@ class Xyzzy:
                 "move": {},
                 "take": {},
                 "drop": {},
+
+                "inventory": None
             }
 
             for k, v in self.registry.items():

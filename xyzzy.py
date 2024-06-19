@@ -12,33 +12,13 @@ from prompt_toolkit import prompt, PromptSession, print_formatted_text, HTML
 from prompt_toolkit.completion import WordCompleter, NestedCompleter
 from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
-from prompt_toolkit.shortcuts import yes_no_dialog, input_dialog, radiolist_dialog, message_dialog
-#from rich.console import Console
-#from rich.panel import Panel
+from prompt_toolkit.shortcuts import yes_no_dialog, input_dialog, radiolist_dialog, message_dialog, clear
 from prompt_toolkit.key_binding import KeyBindings
+from dotenv import load_dotenv, set_key
 
 """
-concept for events
-
-actor {
-    "events": {
-        "hit": ["hit_thing"]
-    }
-}
-
-# story container for event macros
-events {
-    "hit_thing": "xyzzy.damage_object('{$}', 10);xyzzy.writeln('{$name} was damaged by {$inst}.')"
-}
-
-# notebook
-note <text>
-forget (brings up choices of notes to delete)
-renote (brings up choices, then prompt for replacement)
-
-# quests
-functions for adding, checking, deleting, marking complete
-command for listing quests
+TODO
+wrap the runtime in an error handler
 
 """
 # Main state class
@@ -332,6 +312,16 @@ class Xyzzy:
         if not os.path.exists(self.story_dir+"saves/"):
             os.mkdir(self.story_dir+"saves/")
 
+        if not os.path.exists(self.story_dir+".env"):
+            open(self.story_dir+".env", "w+").close()
+
+        load_dotenv(dotenv_path=self.story_dir+".env")
+
+        self.config = {
+            "disable_autocomplete": self.boolinate(os.environ.get("XYZZY_DISABLE_AC", "false")),
+            "disable_statusbar": self.boolinate(os.environ.get("XYZZY_DISABLE_STATUSBAR", "false")),
+            "disable_cls": self.boolinate(os.environ.get("XYZZY_DISABLE_CLS", "false")),
+        }
         # State
         self.protected = False #TODO implement compiled stories that can't be manually edited
         self.reset_state()
@@ -353,8 +343,6 @@ class Xyzzy:
             self.session = PromptSession(history=InMemoryHistory(), key_bindings=bindings)
             self.prompt = "(> "
             self.running = False
-            self.show_hud = True
-            self.clear_screen = False
 
     def read(self, text:str):
         'Main entry point for interfacing with the engine. Reads a string command.'
@@ -688,6 +676,11 @@ class Xyzzy:
         else:
             # Player Mode
             match cmd:
+                case ".env":
+                    k = self.get_input(text="Set Environ key:")
+                    v = self.get_input(text="Set Environ value:")
+                    set_key(self.story_dir+".env", k, v)
+
                 case ".alert":
                     self.post_dialog(text=line)
 
@@ -842,17 +835,17 @@ class Xyzzy:
         'Default command-line shell interface'
         self.running = True
         self.rebuild_autocomplete()
-
+        if not self.config.get("disable_cls"): clear()
         while self.running:
             try:
                 hud = None
-                if self.show_hud: hud = self.bottom_toolbar
+                if not self.config.get("disable_statusbar"): hud = self.bottom_toolbar
                 text = self.session.prompt(
                     self.prompt, completer=self.autocomplete, complete_while_typing=False,
                     auto_suggest=AutoSuggestFromHistory(),
                     bottom_toolbar=hud
                 )
-                if self.clear_screen: self.console.clear()
+                if not self.config.get("disable_cls"): clear()
                 self.read(text)
                 self.rebuild_autocomplete()
 
@@ -867,6 +860,7 @@ class Xyzzy:
         return self.vars.get(key, default_var)
 
     def rebuild_autocomplete(self):
+        # TODO
         loc = self.location()
 
         if self.admin:

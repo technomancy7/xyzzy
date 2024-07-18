@@ -65,6 +65,27 @@ class Xyzzy:
                 return "east"
 
     # GUI
+    def open_text_editor(self, default_text = None, file_extension = "txt"):
+        txtedit = self.config.get("text_editor")
+        if not txtedit: return ""
+        txtfile = self.story_dir+"editing."+file_extension
+
+        if default_text != None:
+            f = open(txtfile, "w+")
+            f.write(str(default_text))
+            f.close()
+
+        if "%s" in txtedit:
+            os.system(txtedit.replace("%s", txtfile))
+        else:
+            os.system(txtedit+" "+txtfile)
+
+        if os.path.exists(txtfile):
+            with open(txtfile, "r") as f:
+                return f.read().strip()
+        else:
+            return ""
+
     def post_dialog(self, *, text = "", title = "Alert"):
         message_dialog(title=title, text=text).run()
 
@@ -81,7 +102,11 @@ class Xyzzy:
         l = self.location()
         n = l.get("name", "Undefined")
         d = l.get("description", "Undefined")
-        return HTML(f'<b><style bg="ansired">{n}</style></b>  {d}')
+        scenestuff = ""
+
+        if self.scene != None and hasattr(self.scene, "__statusbar__"):
+            scenestuff = f" {self.scene.__statusbar__()}"
+        return HTML(f'<b><style bg="ansired">{n}</style></b>  {d} {scenestuff}')
 
     # Object creation
     def _create_actor(self, **opt):
@@ -99,6 +124,7 @@ class Xyzzy:
             "type": "actor"
         }
         actor.update(**opt)
+        actor.update(self.defs.get("actor", {}))
         return actor
 
     def _create_zone(self, **opt):
@@ -119,6 +145,7 @@ class Xyzzy:
             zone["exits"][d] = {"target": "", "lock": ""}
 
         zone.update(**opt)
+        zone.update(self.defs.get("zone", {}))
         return zone
 
 
@@ -143,6 +170,7 @@ class Xyzzy:
         self.author = ""
         self.story_version = ""
 
+        self.defs = {}
         self.features = []
         self.maps = {}
         self.events = {}
@@ -150,10 +178,13 @@ class Xyzzy:
             "goals": {},
             "notebook": []
         }
+        self.generic_store = {}
         self.registry = {} #All objects in the current state (actors and zones)
         self.vars = {} #Flags, switches, etc. Variables of the current state.
         self.focus = "" #The ID of the actor we're currently focused on, i.e. the Player
         self.scene = None
+        self.conversations = {}
+        self.battles = {}
         self.admin = False #If we're in editor mode or not
 
     def load_state(self, sid = "", *, destructive = False):
@@ -230,19 +261,29 @@ class Xyzzy:
         self.vars = js.get("vars", {})
         self.focus = js.get("focus", "")
         self.maps = js.get("maps", "")
+        self.defs = js.get("defs", {})
         self.features = js.get("features", [])
+        self.generic_store = js.get("generic_store", {})
+        self.conversations = js.get('conversations', {})
+        self.battles = js.get('battles', {})
 
         self.scenes = {}
-        
+
         for feature in self.features:
             mod = importlib.import_module(f"extensions.{feature}")
+            self.writeln(f"Loading extension: {mod.__name__}")
 
             try:
-                for scene in mod.XYZZY['scenes']:
-                    self.scenes[scene.__name__] = scene
-                self.writeln(f"Loading extension: {mod.__name__}")
-            except:
-                pass
+                if hasattr(mod, "__connect__") and callable(mod.__connect__):
+                    mod.__connect__()
+
+                if hasattr(mod, "XYZZY"):
+                    for scene in mod.XYZZY.get('scenes', []):
+                        self.scenes[scene.__name__] = scene
+
+
+            except Exception as e:
+                print(e)
 
         if self.protected and self.admin:
             self.writeln("Edit mode is disabled for this story.")
@@ -253,14 +294,14 @@ class Xyzzy:
             self.scene.__exit_scene__()
         self.scene = None
 
-    def set_scene(self, name):
+    def set_scene(self, name, *args, **kargs):
         if self.scene != None and hasattr(self.scene, "__exit_scene__"):
             self.scene.__exit_scene__()
 
         if self.scenes.get(name):
             self.scene = self.scenes[name](self)
             if hasattr(self.scene, "__enter_scene__"):
-                self.scene.__enter_scene__()
+                self.scene.__enter_scene__(*args, **kargs)
 
 
     def load_story(self, path):
@@ -290,11 +331,15 @@ class Xyzzy:
             "id": self.story_id,
             "protected": self.protected,
             "maps": self.maps,
+            "defs": self.defs,
 
             "features": self.features,
             "events": self.events,
             "vars": self.vars,
-            "registry": self.registry
+            "registry": self.registry,
+            "generic_store": self.generic_store,
+            "conversations": self.conversations,
+            "battles": self.battles
         }
 
         return exported
@@ -363,6 +408,9 @@ class Xyzzy:
 
                 # Set true to disable terminal clearing every turn. (Default: false)
                 XYZZY_DISABLE_CLS='false'
+
+                # Default text editor for any function that may need it (Default: nano %s)
+                XYZZY_TEXT_EDITOR='nano %s'
                 """))
 
         load_dotenv(dotenv_path=self.story_dir+".env")
@@ -405,6 +453,11 @@ class Xyzzy:
                     sth='south'
                     wst='west'
                     dwn='down'
+
+                    # Contracted aliases...
+                    # If text starts with the first word, and any of the following words separate by "|", the extra words are deleted
+                    talk1="?talk to|with"
+                    take1="?take the"
                 """))
 
 
@@ -413,6 +466,7 @@ class Xyzzy:
             "disable_autocomplete": self.boolinate(os.environ.get("XYZZY_DISABLE_AC", "false")),
             "disable_statusbar": self.boolinate(os.environ.get("XYZZY_DISABLE_STATUSBAR", "false")),
             "disable_cls": self.boolinate(os.environ.get("XYZZY_DISABLE_CLS", "false")),
+            "text_editor": os.environ.get("XYZZY_TEXT_EDITOR", "nano %s")
         }
 
         # State
@@ -426,15 +480,6 @@ class Xyzzy:
 
         self.scenes = {}
         self.scene = None
-        """for file in os.listdir(self.home_dir+"extensions/"):
-            filename = os.fsdecode(file)
-            if filename.endswith(".py"):
-                print("home "+filename)
-
-        for file in os.listdir(self.story_dir+"extensions/"):
-            filename = os.fsdecode(file)
-            if filename.endswith(".py"):
-                print("story "+filename)"""
 
 
         # Var to check if we're in the core CLI or not, used for interfaces to check features
@@ -473,13 +518,35 @@ class Xyzzy:
     def read(self, text:str):
         'Main entry point for interfacing with the engine. Reads a string command.'
 
-        if text in self.aliases.keys() and self.aliases[text].startswith("!"):
+        for alias in self.aliases.keys(): # ?talk to|with
+            if self.aliases[alias].startswith("?"):
+                primary = self.aliases[alias].split(" ")[0][1:]
+                extras = self.aliases[alias].split(" ")[1].split("|")
+                for extra in extras:
+                    if text.startswith(primary+" "+extra):
+                        if self.scene != None and hasattr(self.scene, "inherit_aliases") and self.scene.inherit_aliases == True:
+                            text = text.replace(primary+" "+extra, primary)
+                        if self.scene == None:
+                            text = text.replace(primary+" "+extra, primary)
+
+        if self.scene == None and text in self.aliases.keys() and self.aliases[text].startswith("!"):
             text = self.aliases[text][1:]
+
+        if self.scene != None and hasattr(self.scene, "inherit_aliases") and self.scene.inherit_aliases == True:
+            if text in self.aliases.keys() and self.aliases[text].startswith("!"):
+                text = self.aliases[text][1:]
+
+
 
         parts = text.split()
         for i, word in enumerate(parts):
             if word in self.aliases.keys() and not self.aliases[word].startswith("!"):
-                parts[i] = self.aliases[word]
+                if self.scene != None and hasattr(self.scene, "inherit_aliases") and self.scene.inherit_aliases == True:
+                    parts[i] = self.aliases[word]
+                if self.scene == None:
+                    parts[i] = self.aliases[word]
+
+
 
         text = " ".join(parts)
         self.writeln(f"{text}", source=self.focus_name(), colour="yellow", prefix = " * ", text_suffix="</grey>", text_prefix="<grey>")
@@ -604,6 +671,16 @@ class Xyzzy:
                         for k, v in obj.get("events", {}).items():
                             self.writeln(f"{obj['id']} -> {k} -> {v}")
 
+                case "event":
+                    gis = self.get_choice(text = "Select action:", values = [("g1", "Create global event"), ("g2", "Attach event to object")])
+                    match gis:
+                        case "g1":
+                            event_id = self.get_input(text = "Define event ID:")
+                            code = self.open_text_editor(file_extension = ".py")
+                            print(code)
+                        case "g2":
+                            pass
+
                 case "modify" | "mod" | "edit":
                     editor = ""
 
@@ -693,6 +770,11 @@ class Xyzzy:
                     self.move_actor(act_id, targ_id)
 
                 case "link": #connects two zones "link <zone_1_id> <direction> <zone_2_id>"
+                    if line == "":
+
+                        self.writeln("Guided creation todo")
+                        return
+
                     fz = line.split(" ")[0]
                     dr = line.split(" ")[1]
                     tz = line.split(" ")[2]
@@ -759,6 +841,49 @@ class Xyzzy:
                         val = " ".join(val).strip()
                     self.writeln(f"Setting {key} to {val} ({type(val).__name__})")
                     self.set_var(key, val)
+
+
+                case "defstr": #sets a def value "def <key>=<value> [!<type>]"
+                    key = line.split("=")[0].strip()
+                    group = key.split(".")[0]
+                    key = key.split(".")[1]
+                    val = "=".join(line.split("=")[1:]).strip()
+                    self.writeln(f"Setting {key} to {val} ({type(val).__name__})")
+
+                    if self.defs.get(group) == None: self.defs[group] = {}
+                    self.defs[group][key] = val
+
+                case "defint": #sets a def value "def <key>=<value> [!<type>]"
+                    key = line.split("=")[0].strip()
+                    group = key.split(".")[0]
+                    key = key.split(".")[1]
+                    val = "=".join(line.split("=")[1:]).strip()
+                    val = int(val)
+                    self.writeln(f"Setting {key} to {val} ({type(val).__name__})")
+                    if self.defs.get(group) == None: self.defs[group] = {}
+                    self.defs[group][key] = val
+
+                case "deffl": #sets a def value "def <key>=<value> [!<type>]"
+                    key = line.split("=")[0].strip()
+                    group = key.split(".")[0]
+                    key = key.split(".")[1]
+                    val = "=".join(line.split("=")[1:]).strip()
+                    val = float(val)
+                    self.writeln(f"Setting {key} to {val} ({type(val).__name__})")
+                    if self.defs.get(group) == None: self.defs[group] = {}
+                    self.defs[group][key] = val
+
+                case "deflist": #sets a def value "def <key>=<value> [!<type>]"
+                    key = line.split("=")[0].strip()
+                    group = key.split(".")[0]
+                    key = key.split(".")[1]
+                    val = "=".join(line.split("=")[1:]).strip()
+                    val = val.split(",")
+                    val = [item.strip() for item in val]
+
+                    self.writeln(f"Setting {key} to {val} ({type(val).__name__})")
+                    if self.defs.get(group) == None: self.defs[group] = {}
+                    self.defs[group][key] = val
 
                 case "inspect":
                     if line != "":
@@ -995,8 +1120,11 @@ class Xyzzy:
                         name = obj['name']
                         #print(obj)
                         if line.lower() == name.lower():
-                            self.writeln(obj['name'], source="Talk")
-                            self.trigger_object_event(obj['id'], "talked", target = obj['id'], instigator = self.focus)
+                            #self.writeln(obj['name'], source="Talk")
+                            if self.object_has_event(obj['id'], "talked"):
+                                self.trigger_object_event(obj['id'], "talked", target = obj['id'], instigator = self.focus)
+                            else:
+                                self.writeln(f"{obj['name']} can't talk to you.")
 
                 case "hit" | "strike": #hits actor in zone, damage if damageable, activate event if exists
                     loc = self.location()
@@ -1016,10 +1144,11 @@ class Xyzzy:
             "builtins": None,
             "obj": self.get_object,
             "player": self.get_object(self.focus),
-            "print": self.writeln
+            "print": self.writeln,
+            "goto": self.set_scene
         }
         env.update(**opts)
-        eval(code, env)
+        return eval(code, env)
 
     def writeln(self, text, source = "Xyzzy", colour = "skyblue", text_prefix = "", text_suffix = "", prefix = ""):
         if len(prefix) > 3: prefix = prefix[:3]
@@ -1044,7 +1173,10 @@ class Xyzzy:
                 )
                 if not self.config.get("disable_cls"): clear()
                 self.read(text)
-                self.rebuild_autocomplete()
+                if self.scene != None and hasattr(self.scene, "__autocomplete__"):
+                    pass
+                else:
+                    self.rebuild_autocomplete()
 
             except KeyboardInterrupt:
                 print("bye") # TODO save data here
@@ -1059,8 +1191,10 @@ class Xyzzy:
     def rebuild_autocomplete(self):
         # TODO
         loc = self.location()
+        if self.scene != None and hasattr(self.scene, "__autocomplete__"):
+            self.autocomplete = NestedCompleter.from_nested_dict(self.scene.__autocomplete__())
 
-        if self.admin:
+        elif self.admin:
             acd = {
                 "link": {},
             }
@@ -1073,18 +1207,32 @@ class Xyzzy:
                         for sk, sv in self.registry.items():
                             if sv['type'] == "zone":
                                 acd['link'][k][d][sk] = None
+            #print(json.dumps(acd, indent=4))
+            self.autocomplete = NestedCompleter.from_nested_dict(acd)
         else:
             acd = {
                 "move": {},
-                "take": {},
+                "take": {
+                    "the": {}
+                },
                 "drop": {},
+                "talk": {
+                    "to": {},
+                    "with": {},
+                },
 
                 "inventory": None
             }
 
             for k, v in self.registry.items():
+                if v['type'] == "actor":
+                    acd["talk"][v['name']] = None
+                    acd["talk"]["to"][v['name']] = None
+                    acd["talk"]["with"][v['name']] = None
+
                 if v['type'] == "actor" and v['location'] == loc['id'] and "inventory" in v['tags']:
                     acd['take'][v['name']] = None
+                    acd['take']["the"][v['name']] = None
 
                 if v['type'] == "actor" and v['location'] == self.focus and "inventory" in v['tags']:
                     acd['drop'][v['name']] = None
@@ -1092,7 +1240,7 @@ class Xyzzy:
             for d in self._directions():
                 acd['move'][d] = None
 
-        self.autocomplete = NestedCompleter.from_nested_dict(acd)
+            self.autocomplete = NestedCompleter.from_nested_dict(acd)
 
     def add_autocomplete(self, word:str):
         self.autocomplete.words.append(word)
@@ -1163,6 +1311,14 @@ class Xyzzy:
             if k == name:
                 #code = evt.replace("{$}", obj_id)
                 self._eval_code(evt, **opts)
+
+    def object_has_event(self, obj_id, name):
+        obj = self.get_object(obj_id)
+        if obj.get("events"):
+            evts = obj['events'].get(name, [])
+            if len(evts) > 0:
+                return True
+        return False
 
     def trigger_object_event(self, obj_id, name, **opts):
         obj = self.get_object(obj_id)

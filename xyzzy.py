@@ -584,6 +584,9 @@ class Xyzzy:
             self.scene.read(text)
             return
 
+        if text.count("'") % 2 == 1:
+            text = text.replace("'", "\\'")
+        print(text)
         cmd = shlex.split(text)[0]
         line = ' '.join(shlex.split(text)[1:])
 
@@ -718,6 +721,10 @@ class Xyzzy:
                         editor = self.get_choice(values=vals)
                     else:
                         editor = line
+
+                    if not editor:
+                        return self.writeln("Cancelled.")
+
                     while True:
                         key = self.get_input(text = f"Edit {self.registry[editor]['type']} {editor} key: (empty to end)")
 
@@ -1056,17 +1063,31 @@ class Xyzzy:
 
                 case "inventory":
                     player = self.get_object(self.focus)
-                    if line == "full":
-                        for item in player['contains']:
-                            obj = self.get_object(item)
-                            self.writeln(f"{obj['name']} - {obj['description']}")
-                            self.writeln(f"Tags: {obj['tags']}")
-                            self.writeln("")
-                    else:
-                        self.writeln(", ".join([self.get_object(item)['name'] for item in player['contains']]))
+                    self.writeln(", ".join([self.get_object(item)['name'] for item in player['contains']]))
 
                 case "look":
                     # TODO make a version in admin mode which shows the ID's
+                    if line == "at me":
+                        player = self.get_object(self.focus)
+                        self.writeln(f"# {player['name']}")
+                        self.writeln(f"Health: {player['health']}")
+                        self.writeln(f"Energy: {player['energy']}")
+                        self.writeln("")
+
+                        if player.get("slots"):
+                            for k, v in player['slots'].items():
+                                self.writeln(f"{k} = {self.get_object(v)['name']}")
+                            self.writeln("")
+
+                        for item in player['contains']:
+                            obj = self.get_object(item)
+                            self.writeln(f"{obj['name']} - {obj['description']}")
+                            if "equipped" in obj['tags']:
+                                self.writeln(f"Equipped on {obj['slot']}")
+                            self.writeln(f"Tags: {obj['tags']}")
+                            self.writeln("")
+
+                        return
                     l = self.location()
                     self.writeln(f"You are in {l['name']}.")
                     if l['description']:
@@ -1108,25 +1129,45 @@ class Xyzzy:
                             self.trigger_object_event(obj['id'], "dropped", target = obj['id'], instigator = self.focus)
 
                 case "equip" | "wear": #if item in inventory is equippable, set as equipped
-                    loc = self.get_object(self.focus)
-                    for i in loc['contains']:
+                    player = self.get_object(self.focus)
+                    for i in player['contains']:
                         obj = self.get_object(i)
                         name = obj['name']
-                        if line.lower() == name.lower() and "equipment" in obj['tags'] and "equipped" not in obj["tags"]:
-                            obj['tags'].append("equipped")
-                            self.writeln(obj['name'], source="Equipped")
-                            self.trigger_object_event(obj['id'], "equipped", target = obj['id'], instigator = self.focus)
+                        if line.lower() == name.lower():
+                            if obj.get("slot") and "equipment" in obj['tags']:
+                                if "equipped" in obj["tags"]:
+                                    return self.writeln("Already equipped.")
+
+                                if not player.get("slots"):
+                                    player["slots"] = {}
+
+                                if player['slots'].get(obj['slot']):
+                                    return self.writeln(f"Slot {obj['slot']} already full.")
+
+                                obj['tags'].append("equipped")
+                                player['slots'][obj['slot']] = obj['id']
+                                self.writeln(obj['name'], source="Equipped")
+                                self.trigger_object_event(obj['id'], "equipped", target = obj['id'], instigator = self.focus)
+                            else:
+                                self.writeln("Object not equippable...")
 
                 case "unequip" | "unwear": #if item is equipped, remove
-                    loc = self.get_object(self.focus)
-                    for i in loc['contains']:
+                    player = self.get_object(self.focus)
+                    for i in player['contains']:
                         obj = self.get_object(i)
                         name = obj['name']
-                        if line.lower() == name.lower() and "equipment" in obj['tags'] and "equipped" in obj["tags"]:
+                        if line.lower() == name.lower() and "equipment" in obj['tags']:
+                            if "equipped" not in obj["tags"]:
+                                return self.writeln(f"{obj['name']} is not equipped.")
+
                             if "locked" in obj['tags']:
                                 return self.writeln(f"{obj['name']} can't be removed.")
 
+                            if not player.get("slots"):
+                                player["slots"] = {}
+
                             obj['tags'].remove("equipped")
+                            player['slots'][obj['slot']] = ""
                             self.writeln(obj['name'], source="Unequipped")
                             self.trigger_object_event(obj['id'], "unequipped", target = obj['id'], instigator = self.focus)
 
@@ -1246,6 +1287,11 @@ class Xyzzy:
                     "to": {},
                     "with": {},
                 },
+                "equip": {},
+                "wear": {},
+
+                "unequip": {},
+                "unwear": {},
 
                 "inventory": None
             }
@@ -1262,6 +1308,13 @@ class Xyzzy:
 
                 if v['type'] == "actor" and v['location'] == self.focus and "inventory" in v['tags']:
                     acd['drop'][v['name']] = None
+                    if "equipment" in v['tags'] and "equipped" not in v['tags']:
+                        acd['wear'][v['name']] = None
+                        acd['equip'][v['name']] = None
+
+                    if "equipment" in v['tags'] and "equipped" in v['tags']:
+                        acd['unequip'][v['name']] = None
+                        acd['unwear'][v['name']] = None
 
             for d in self._directions():
                 acd['move'][d] = None

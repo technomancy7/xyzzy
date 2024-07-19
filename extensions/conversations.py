@@ -16,7 +16,12 @@ class Convo:
             return True
         c = self.convo_data[self.current_stage].get("conditions", {})[s]
         parts = shlex.split(c, " ")
-        first = self.state.touch_var(parts[0])
+        if "." in parts[0]:
+            obj = self.get_object(parts[0].split(".")[0])
+
+            first = obj.get(parts[0].split(".")[1])
+        else:
+            first = self.state.touch_var(parts[0])
         checker = parts[1]
         value = self.state._eval_code(parts[2])
         match checker:

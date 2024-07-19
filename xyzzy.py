@@ -117,6 +117,8 @@ class Xyzzy:
             "description": "",
             "health": 100,
             "energy": 100,
+            "max_health": 100,
+            "max_energy": 100,
             "contains": [],
             "tags": [],
             "location": "",
@@ -164,27 +166,51 @@ class Xyzzy:
 
     # State management
     def reset_state(self):
+        # Story metadata
         self.story_title = ""
         self.story_description = ""
         self.story_id = ""
         self.author = ""
         self.story_version = ""
 
+        # Object definition defaults
         self.defs = {}
+
+        # Extensions used
         self.features = []
+
+        # Text map data
         self.maps = {}
+
+        # Global event table
         self.events = {}
+
+        # Data stored in player save file
         self.player_save_data = { # container for any information that may be kept in a players save file
             "goals": {},
             "notebook": []
         }
+
+        # Table for storing any arbitrary data, useful for custom extensions
         self.generic_store = {}
-        self.registry = {} #All objects in the current state (actors and zones)
-        self.vars = {} #Flags, switches, etc. Variables of the current state.
-        self.focus = "" #The ID of the actor we're currently focused on, i.e. the Player
+
+        #All objects in the current state (actors and zones)
+        self.registry = {}
+
+        #Flags, switches, etc. Variables of the current state.
+        self.vars = {}
+
+        #The ID of the actor we're currently focused on, i.e. the Player
+        self.focus = ""
+
+        #Current scene object
         self.scene = None
+
+        #Table of conversations
         self.conversations = {}
-        self.battles = {}
+
+        #self.battles = {}
+
         self.admin = False #If we're in editor mode or not
 
     def load_state(self, sid = "", *, destructive = False):
@@ -265,7 +291,7 @@ class Xyzzy:
         self.features = js.get("features", [])
         self.generic_store = js.get("generic_store", {})
         self.conversations = js.get('conversations', {})
-        self.battles = js.get('battles', {})
+        #self.battles = js.get('battles', {})
 
         self.scenes = {}
 
@@ -339,7 +365,7 @@ class Xyzzy:
             "registry": self.registry,
             "generic_store": self.generic_store,
             "conversations": self.conversations,
-            "battles": self.battles
+            #"battles": self.battles
         }
 
         return exported
@@ -1255,14 +1281,20 @@ class Xyzzy:
             for _, obj in self.registry.items():
                 if act_id in obj['contains']:
                     obj['contains'].remove(act_id)
-                    #print(f"Removed object from location: {obj['id']}")
 
                 if obj['id'] == target_id:
                     obj['contains'].append(act_id)
-                    #print(f"Added object to location: {obj['id']}")
 
             self.registry[act_id]['location'] = target_id
-            #print(f"Updated location value: {self.registry[act_id]['location']}")
+
+    # Takes an object out of the world, but does not delete it from registry
+    def remove_actor(self, act_id):
+        if self.registry.get(act_id) and self.registry[act_id]['type'] == "actor":
+            for _, obj in self.registry.items():
+                if act_id in obj['contains']:
+                    obj['contains'].remove(act_id)
+
+            self.registry[act_id]['location'] = ""
 
     def unlink_zones(self, first, direction):
         fz = self.get_object(first)

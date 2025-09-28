@@ -11,16 +11,23 @@ class XySh(cmd.Cmd):
         self.state = state
         self.state.sh = self
 
-    def do_py(self, arg):
-        e = compile(arg, "<string>", "eval")
-        g = {
-            "sh": self,
-            "state": self.state,
-            "player": self.state.player,
-            "location": self.state.location,
-            "log": self.state.log
-        }
-        eval(e, g)
+    def do_shell(self, arg):
+        if arg.startswith("!"):
+            os.system(arg[1:])
+        else:
+            try:
+                e = compile(arg, "<string>", "eval")
+                g = {
+                    "sh": self,
+                    "state": self.state,
+                    "player": self.state.player,
+                    "location": self.state.location,
+                    "log": self.state.log
+                }
+                eval(e, g)
+            except Exception as e:
+                print(e)
+
 
     def do_echo(self, arg):
         print("You said:", arg)

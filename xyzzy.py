@@ -6,47 +6,112 @@ sys.path.append(story_path)
 class XySh(cmd.Cmd):
     intro = 'Welcome to Xyzzy. Type LOAD followed by a story name to begin.\n'
     prompt = '(No story loaded) '
+    response_handler = None
+    ansi_colours = {
+        "black": "\033[30m",
+        "red": "\033[31m",
+        "green": "\033[32m",
+        "yellow": "\033[33m",
+        "blue": "\033[34m",
+        "magenta": "\033[35m",
+        "cyan": "\033[36m",
+        "white": "\033[37m",
+        "bright_black": "\033[90m",
+        "bright_red": "\033[91m",
+        "bright_green": "\033[92m",
+        "bright_yellow": "\033[93m",
+        "bright_blue": "\033[94m",
+        "bright_magenta": "\033[95m",
+        "bright_cyan": "\033[96m",
+        "bright_white": "\033[97m",
+        "reset": "\033[0m"
+    }
+
+    def c(self, name = "reset"):
+        return self.ansi_colours.get(name, "\033[0m")
 
     def set_xy(self, state):
         self.state = state
         self.state.sh = self
+
+    def do_pass(self, line):
+        pass
+
+    def precmd(self, line):
+        if self.response_handler != None:
+            if not self.response_handler(line):
+                self.response_handler = None
+                return "pass"
+            return ""
+        return line
+
+    def _select(self, opts, callback):
+        if len(opts) == 0:
+            self.state.log("Nothing found", "world")
+
+        elif len(opts) == 1:
+            try:
+                callback(opts[list(opts.keys())[0]])
+            except Exception as e:
+                self.state.log(f"{e}", "error")
+
+        else:
+            def _filter(l):
+                try:
+                    callback(opts[list(opts.keys())[int(l)]])
+                except Exception as e:
+                    self.state.log(f"{e}", "error")
+
+            self.state.log("> Select one:", "choice")
+            for i, key in enumerate(opts.keys()):
+                m = opts[key]
+                self.state.log(m, f"{i}")
+
+            self.response_handler = _filter
 
     def do_shell(self, arg):
         if arg.startswith("!"):
             os.system(arg[1:])
         else:
             try:
-                e = compile(arg, "<string>", "eval")
-                g = {
+                eval(compile(arg, "<string>", "eval"), {
                     "sh": self,
                     "state": self.state,
                     "player": self.state.player,
                     "location": self.state.location,
                     "log": self.state.log
-                }
-                eval(e, g)
+                })
             except Exception as e:
                 print(e)
 
-
-    def do_echo(self, arg):
-        print("You said:", arg)
-
-    def do_talk(self, target):
-        pass
-        # TODO check if target is in contains key of location like take, but check if it extends Human and has on_talk event
-
-    def do_take(self, item_name):
-        pass
-        """
-        TODO
-        lool at Location, see if name is in contains, subtract the count by 1 (delete from table if 0), add to player inventory table by increment value + 1 (create key if dont have)
-
-        sanity check, get the cls and check if it extends InventoryItem first
-
-        """
+    def do_say(self, arg):
+        self.state.player.say(arg)
 
     def do_drop(self, item_name):
+        """Drops item from inventory in to current location"""
+        opts = self.state._find_matches(item_name, self.state.player.inventory)
+
+        def actual_take(target):
+            if self.state.isof(target, InventoryItem):
+                self.state.player.remove_item(target)
+                self.state.location.add_item(target)
+                self.state.log(target.name, "drop")
+
+        self._select(opts, actual_take)
+
+    def do_take(self, item_name):
+        """Takes an item from the current location"""
+        opts = self.state._find_matches(item_name)
+
+        def actual_take(target):
+            if self.state.isof(target, InventoryItem):
+                self.state.location.remove_item(target)
+                self.state.player.add_item(target)
+                self.state.log(target.name, "take")
+
+        self._select(opts, actual_take)
+
+    def do_talk(self, item_name):
         pass
         """
         TODO
@@ -54,8 +119,46 @@ class XySh(cmd.Cmd):
 
         """
 
+    def do_move(self, direction):
+        l = self.state.location
+        if hasattr(l, f"exit_{direction}"):
+            e = getattr(l, f"exit_{direction}")
+            self.state.location = self.state.getcls(e()['name'])
+            self.state.log(f"Entering {self.state.location.name}")
+        else:
+            self.state.log("There is nothing there.")
+
+    def do_hit(self, arg):
+        opts = self.state._find_matches(arg)
+
+        def actual_hit(target):
+            target.take_damage(10, "player")
+            self.state.log(f"{target.name}", "hit")
+
+        self._select(opts, actual_hit)
+
+    def do_inventory(self, arg):
+        for k, v in self.state.player.inventory.items():
+            item = self.state.getcls(k)
+            self.state.log(f"{item.name} x{v}", "inventory")
+
     def do_look(self, arg):
-        print(self.state.player.health)
+        self.state.log(f"You are in {self.state.location.name}")
+        for d in self.state.directions:
+            if hasattr(self.state.location, f"exit_{d}"):
+                e = getattr(self.state.location, f"exit_{d}")()
+                ex = self.state.getcls(e['name'])
+                self.state.log(f"To the {d} is {ex}", "world")
+
+        self.state.log(f"Player Health: {self.state.player.health}", "look")
+        for key, count in self.state.location.contains.items():
+            c = self.state.getcls(key)
+            if self.state.isof(c, Human):
+                self.state.log(f"{c}", "look")
+            elif self.state.isof(c, InventoryItem):
+                self.state.log(f"{c} x{count}", "look")
+            else:
+                self.state.log(f"{c} x{count}", "look")
 
     def do_save(self, arg):
         self.state.export_state(arg or "save")
@@ -74,17 +177,35 @@ class XySh(cmd.Cmd):
 class XyState:
     def __init__(self):
         self.tree = {"zones": {}, "objects": {}}
+        self.directions = ["north", "south", "east", "west", "up", "down", "in", "out"]
+        self.reverse_directions = {
+            "north": "south", "south": "north",
+            "east": "west", "west": "east",
+            "up": "down", "down": "up",
+            "in": "out", "out": "in"
+        }
         self.story = None
         self.sh = None
 
         self.player = None
         self.location = None
 
+    def _find_matches(self, srch, cont = None):
+        if cont == None: cont = self.location.contains
+
+        opts = {}
+        for key, count in cont.items():
+            c = self.getcls(key)
+            if c.name.lower().startswith(srch.lower()):
+                opts[key] = c
+
+        return opts
+
     def export_state(self, name = "save"):
         output = {}
         output["state"] = {
-            "player": self.player.__class__.__name__,
-            "location": self.location.__class__.__name__
+            "player": self.player.xyname(),
+            "location": self.location.xyname()
         }
 
         for k, v in self.tree.items():
@@ -120,10 +241,11 @@ class XyState:
                 d = json.load(f)
                 for objectName, props in d['objects'].items():
                     self.makecls(objectName, props)
+
                 for objectName, props in d['zones'].items():
                     self.makecls(objectName, props)
+
                 self.player = self.getcls(d['state']['player'])
-                #self.player.loadxyd(d[])
                 self.location = self.getcls(d['state']['location'])
         else:
             self.player = self.getcls(self.story.story()['player'])
@@ -145,7 +267,11 @@ class XyState:
         if name in self.tree['zones'].keys():
             return self.tree['zones'][name]
 
-        new_cls = self.story.__dict__[name](self)
+        try:
+            new_cls = self.story.__dict__[name](self)
+        except Exception as e:
+            print(e)
+            return None
 
         if make_with:
             new_cls.loadxyd(make_with)

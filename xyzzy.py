@@ -70,6 +70,28 @@ class XySh(cmd.Cmd):
             self.response_handler = _filter
 
     def do_shell(self, arg):
+        """
+        Allows the user to access both a python and system-level shell without leaving the command loop.
+        !python
+        !!shell
+
+        e.g.:
+        !print(state.story_vars)
+        !!ls
+
+
+        Within the python shell, you can use aliases for common state functions:
+        sh -> The shell class
+        state -> The story state
+        story -> The story's module object
+        player -> Player object
+        location -> Player's location object
+        log -> Function, the method used to print messages
+        sv -> Function, Set Var, sets a story variable
+        v -> Function, Value, gets a story variable
+        vs -> Dictionary of story variables
+        tree -> Dictionary of the tree that contains all objects in the story
+        """
         if arg.startswith("!"):
             os.system(arg[1:])
         else:
@@ -77,9 +99,14 @@ class XySh(cmd.Cmd):
                 eval(compile(arg, "<string>", "eval"), {
                     "sh": self,
                     "state": self.state,
+                    "story": self.state.story,
                     "player": self.state.player,
                     "location": self.state.location,
-                    "log": self.state.log
+                    "log": self.state.log,
+                    "sv": self.state.sv,
+                    "v": self.state.v,
+                    "vs": self.state.story_vars,
+                    "tree": self.state.tree
                 })
             except Exception as e:
                 print(e)
@@ -121,9 +148,10 @@ class XySh(cmd.Cmd):
 
     def do_move(self, direction):
         l = self.state.location
-        if hasattr(l, f"exit_{direction}"):
-            e = getattr(l, f"exit_{direction}")
-            self.state.location = self.state.getcls(e()['name'])
+        #if hasattr(l, f"exit_{direction}"):
+        e = getattr(l, f"exit_{direction}")()
+        if e:
+            self.state.location = self.state.getcls(e['name'])
             self.state.log(f"Entering {self.state.location.name}")
         else:
             self.state.log("There is nothing there.")
@@ -145,8 +173,9 @@ class XySh(cmd.Cmd):
     def do_look(self, arg):
         self.state.log(f"You are in {self.state.location.name}")
         for d in self.state.directions:
-            if hasattr(self.state.location, f"exit_{d}"):
-                e = getattr(self.state.location, f"exit_{d}")()
+            #if hasattr(self.state.location, f"exit_{d}"):
+            e = getattr(self.state.location, f"exit_{d}")()
+            if e:
                 ex = self.state.getcls(e['name'])
                 self.state.log(f"To the {d} is {ex}", "world")
 
@@ -189,6 +218,13 @@ class XyState:
 
         self.player = None
         self.location = None
+        self.story_vars = {}
+
+    def sv(self, key, v):
+        self.story_vars[key] = v
+
+    def v(self, key, d = None):
+        return self.story_vars.get(key, d)
 
     def _find_matches(self, srch, cont = None):
         if cont == None: cont = self.location.contains
@@ -205,7 +241,8 @@ class XyState:
         output = {}
         output["state"] = {
             "player": self.player.xyname(),
-            "location": self.location.xyname()
+            "location": self.location.xyname(),
+            "vars": self.story_vars
         }
 
         for k, v in self.tree.items():
@@ -228,6 +265,7 @@ class XyState:
             self.tree = {"zones": {}, "objects": {}}
             self.player = None
             self.location = None
+            self.story_vars = {}
             self.story = importlib.import_module(name, package=None)
         except Exception as e:
             print(e)
@@ -247,9 +285,11 @@ class XyState:
 
                 self.player = self.getcls(d['state']['player'])
                 self.location = self.getcls(d['state']['location'])
+                self.story_vars = d['state'].get("vars", {})
         else:
             self.player = self.getcls(self.story.story()['player'])
             self.location = self.getcls(self.story.story()['start'])
+            self.story_vars = self.story.story().get('default_vars', {})
 
         return True
 

@@ -1,6 +1,6 @@
 import sys, os, importlib, cmd, readline, json
-from xyobjects import Human, InventoryItem
 story_path = os.path.expanduser("~/.xyzzy-stories")
+from xyobjects import Human, Pawn, InventoryItem, Decoration
 sys.path.append(story_path)
 
 class XySh(cmd.Cmd):
@@ -60,7 +60,7 @@ class XySh(cmd.Cmd):
                 try:
                     callback(opts[list(opts.keys())[int(l)]])
                 except Exception as e:
-                    self.state.log(f"{e}", "error")
+                    self.state.log(f"Invalid input.", "error")
 
             self.state.log("> Select one:", "choice")
             for i, key in enumerate(opts.keys()):
@@ -119,7 +119,7 @@ class XySh(cmd.Cmd):
         opts = self.state._find_matches(item_name, self.state.player.inventory)
 
         def actual_take(target):
-            if self.state.isof(target, InventoryItem):
+            if self.state.isof(target, InventoryItem) and not target.is_inventory_locked():
                 self.state.player.remove_item(target)
                 self.state.location.add_item(target)
                 self.state.log(target.name, "drop")
@@ -131,25 +131,37 @@ class XySh(cmd.Cmd):
         opts = self.state._find_matches(item_name)
 
         def actual_take(target):
-            if self.state.isof(target, InventoryItem):
+            if self.state.isof(target, InventoryItem) and not target.is_inventory_locked():
                 self.state.location.remove_item(target)
                 self.state.player.add_item(target)
                 self.state.log(target.name, "take")
+            else:
+                self.state.log("Can't take that.")
 
         self._select(opts, actual_take)
+
+    def do_use(self, item_name):
+        """Uses an item from the inventory"""
+        opts = self.state._find_matches(item_name, self.state.player.inventory)
+
+        def actual_use(target):
+            if self.state.isof(target, InventoryItem):
+                if target.one_use:
+                    self.state.player.remove_item(target)
+                target.on_use()
+
+        self._select(opts, actual_use)
 
     def do_talk(self, item_name):
         pass
         """
         TODO
-        opposite of take
 
         """
 
     def do_move(self, direction):
         l = self.state.location
-        #if hasattr(l, f"exit_{direction}"):
-        e = getattr(l, f"exit_{direction}")()
+        e = l.get_exit(direction)
         if e:
             self.state.location = self.state.getcls(e['name'])
             self.state.log(f"Entering {self.state.location.name}")
@@ -160,8 +172,12 @@ class XySh(cmd.Cmd):
         opts = self.state._find_matches(arg)
 
         def actual_hit(target):
-            target.take_damage(10, "player")
-            self.state.log(f"{target.name}", "hit")
+            if self.state.isof(target, Pawn) or self.state.isof(target, Decoration):
+                self.state.log(f"{target.name}", "hit")
+                target.take_damage(10, "player")
+
+            else:
+                self.state.log("Can't hit that.")
 
         self._select(opts, actual_hit)
 
@@ -173,7 +189,6 @@ class XySh(cmd.Cmd):
     def do_look(self, arg):
         self.state.log(f"You are in {self.state.location.name}")
         for d in self.state.directions:
-            #if hasattr(self.state.location, f"exit_{d}"):
             e = getattr(self.state.location, f"exit_{d}")()
             if e:
                 ex = self.state.getcls(e['name'])
@@ -251,7 +266,6 @@ class XyState:
             for objname, val in v.items():
                 output[k][objname] = val.xydata()
 
-        print(output)
         save_to = story_path+"/saves/"+self.story.story().get('save_id', 'xyzzy')+"_"+name
         with open(save_to, "w+") as f:
             json.dump(output, f, indent=4)
